@@ -1,0 +1,14 @@
+{
+    "name": "niks-degoog-extensions",
+    "description": "My plugins and themes for degoog search.",
+    "repo-image": "https://github.com/git-nikitakostin/nikita-degoog-addons.git/icon.jpg",
+    "author": "nikita",
+    "plugins": [
+      {
+        "path": "plugins/prowlarr",
+        "name": "Prowlarr",
+        "description": "Searches torrents",
+        "version": "1.0.0",
+        "type": "command"
+      },
+}
