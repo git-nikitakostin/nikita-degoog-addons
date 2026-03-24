@@ -3,14 +3,15 @@
     "description": "My plugins and themes for degoog search.",
     "repo-image": "https://raw.githubusercontent.com/git-nikitakostin/nikita-degoog-addons/refs/heads/main/icon.jpg",
     "author": "nikita",
-    "plugins":[],
-    "themes": [],
-    "engines": [
-      {
-        "path": "engines/prowlarr",
-        "name": "Prowlarr",
-        "description": "Search all your Prowlarr indexers directly from degoog. Results appear under a Torrents tab. Requires a running Prowlarr instance and API key.",
-      "version": "1.0.0"
+     "plugins": [
+    {
+      "path": "plugins/prowlarr",
+      "name": "Prowlarr",
+      "description": "Search your Prowlarr indexers directly from degoog via !prowlarr. Requires a running Prowlarr instance and API key.",
+      "version": "1.0.0",
+      "type": "command"
     }
-  ]
+  ],
+    "themes": [],
+    "engines": []
 }
