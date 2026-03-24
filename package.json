@@ -1,7 +1,7 @@
 {
     "name": "niks-degoog-extensions",
     "description": "My plugins and themes for degoog search.",
-    "repo-image": "https://github.com/git-nikitakostin/nikita-degoog-addons.git/icon.jpg",
+    "repo-image": "https://github.com/git-nikitakostin/nikita-degoog-addons/blob/main/icon.jpg",
     "author": "nikita",
     "plugins": [
       {
