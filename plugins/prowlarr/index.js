@@ -1,21 +1,14 @@
 const PROWLARR_LOGO =
   "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@refs/heads/main/svg/prowlarr.svg";
 
-const TRACKERS = [
-  "udp://open.stealth.si:80/announce",
-  "udp://tracker.opentrackr.org:1337/announce",
-  "udp://tracker.torrent.eu.org:451/announce",
-  "udp://tracker.tiny-vps.com:6969/announce",
-  "http://nyaa.tracker.wf:7777/announce",
-].map((t) => `&tr=${encodeURIComponent(t)}`).join("");
-
 const SORT_OPTIONS = {
-  "Default":      { fn: null },
-  "Seeders":      { fn: (a, b) => (b.seeders ?? -1) - (a.seeders ?? -1) },
-  "Leechers":     { fn: (a, b) => (b.leechers ?? -1) - (a.leechers ?? -1) },
-  "Size (asc)":   { fn: (a, b) => (a.size ?? 0) - (b.size ?? 0) },
-  "Size (desc)":  { fn: (a, b) => (b.size ?? 0) - (a.size ?? 0) },
-  "Newest first": { fn: (a, b) => new Date(b.publishDate ?? 0) - new Date(a.publishDate ?? 0) },
+  "Default":       { fn: null },
+  "Seeders":       { fn: (a, b) => (b.seeders ?? -1) - (a.seeders ?? -1) },
+  "Leechers":      { fn: (a, b) => (b.leechers ?? -1) - (a.leechers ?? -1) },
+  "Size (asc)":    { fn: (a, b) => (a.size ?? 0) - (b.size ?? 0) },
+  "Size (desc)":   { fn: (a, b) => (b.size ?? 0) - (a.size ?? 0) },
+  "Newest first":  { fn: (a, b) => new Date(b.publishDate ?? 0) - new Date(a.publishDate ?? 0) },
+  "Oldest first":  { fn: (a, b) => new Date(a.publishDate ?? 0) - new Date(b.publishDate ?? 0) },
 };
 
 let prowlarrUrl = "";
@@ -23,67 +16,6 @@ let apiKey = "";
 let categories = [];
 let defaultSort = "Default";
 let template = "";
-
-// ─── Bencode parser (no deps) ─────────────────────────────────────────────────
-
-function bencodeSkip(buf, i) {
-  if (i >= buf.length) return -1;
-  const c = buf[i];
-  if (c === 100) { // 'd'
-    i++;
-    while (i < buf.length && buf[i] !== 101) {
-      i = bencodeSkip(buf, i); if (i === -1) return -1;
-      i = bencodeSkip(buf, i); if (i === -1) return -1;
-    }
-    return i + 1;
-  }
-  if (c === 108) { // 'l'
-    i++;
-    while (i < buf.length && buf[i] !== 101) {
-      i = bencodeSkip(buf, i); if (i === -1) return -1;
-    }
-    return i + 1;
-  }
-  if (c === 105) { // 'i'
-    const e = buf.indexOf(101, i + 1);
-    return e === -1 ? -1 : e + 1;
-  }
-  if (c >= 48 && c <= 57) { // string "len:data"
-    const colon = buf.indexOf(58, i);
-    if (colon === -1) return -1;
-    const len = parseInt(buf.slice(i, colon).toString(), 10);
-    return colon + 1 + len;
-  }
-  return -1;
-}
-
-async function extractInfoHash(buf) {
-  const marker = Buffer.from("4:info");
-  const idx = buf.indexOf(marker);
-  if (idx === -1) return null;
-  const start = idx + marker.length;
-  const end = bencodeSkip(buf, start);
-  if (end === -1) return null;
-  const { createHash } = await import("node:crypto");
-  return createHash("sha1").update(buf.slice(start, end)).digest("hex");
-}
-
-async function torrentToMagnet(downloadUrl, title, doFetch) {
-  try {
-    const res = await doFetch(downloadUrl, { redirect: "follow" });
-    if (!res.ok) return null;
-    const arrayBuf = await res.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-    const hash = await extractInfoHash(buf);
-    if (!hash) return null;
-    const dn = encodeURIComponent(title ?? "");
-    return `magnet:?xt=urn:btih:${hash}&dn=${dn}${TRACKERS}`;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function escHtml(s) {
   return String(s)
@@ -101,8 +33,8 @@ function formatBytes(bytes) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
-function renderItem(item, resolvedMagnet) {
-  const magnetUrl = resolvedMagnet || item.magnetUrl || null;
+function renderItem(item) {
+  const magnetUrl = item.magnetUrl || null;
   const downloadUrl = item.downloadUrl || null;
   const infoUrl = item.infoUrl || item.guid || null;
 
@@ -110,10 +42,14 @@ function renderItem(item, resolvedMagnet) {
 
   const magnetBtn = magnetUrl
     ? `<a class="prowlarr-btn prowlarr-btn-magnet" href="${escHtml(magnetUrl)}">\uD83E\uDDF2 Magnet</a>`
+    : downloadUrl
+    ? `<button class="prowlarr-btn prowlarr-btn-gen" data-torrent-url="${escHtml(downloadUrl)}" data-title="${escHtml(item.title ?? "")}">\uD83E\uDDF2 Generate magnet</button>`
     : "";
+
   const torrentBtn = downloadUrl
     ? `<a class="prowlarr-btn prowlarr-btn-torrent" href="${escHtml(downloadUrl)}">\u2B07 Torrent</a>`
     : "";
+
   const actionButtons = (magnetBtn || torrentBtn)
     ? `<div class="prowlarr-actions">${magnetBtn}${torrentBtn}</div>`
     : "";
@@ -153,8 +89,6 @@ function renderItem(item, resolvedMagnet) {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => data[key] ?? "");
 }
 
-// ─── Plugin export ────────────────────────────────────────────────────────────
-
 export default {
   name: "Prowlarr",
   description: "Search your Prowlarr indexers",
@@ -192,7 +126,7 @@ export default {
       label: "Default sort",
       type: "select",
       options: Object.keys(SORT_OPTIONS),
-      description: "How to sort results. You can override per-search with !prowlarr term --sort seeders",
+      description: "How to sort results. Override per-search with !prowlarr term --sort Seeders",
     },
   ],
 
@@ -227,14 +161,13 @@ export default {
     if (!args.trim()) {
       return {
         title: "Prowlarr",
-        html: `<div class="command-result"><p>Usage: <code>!prowlarr &lt;search term&gt;</code> <br>Optional: <code>--sort seeders|leechers|size_asc|size_desc|date</code></p></div>`,
+        html: `<div class="command-result"><p>Usage: <code>!prowlarr &lt;search term&gt;</code><br>Optional: <code>--sort Seeders|Leechers|"Size (asc)"|"Size (desc)"|"Newest first"|"Oldest first"</code></p></div>`,
       };
     }
 
-    // Parse optional --sort flag from args
-    const sortMatch = args.match(/--sort\s+(\S+)/);
-    const sortKey = (sortMatch && SORT_OPTIONS[sortMatch[1]]) ? sortMatch[1] : defaultSort;
-    const term = args.replace(/--sort\s+\S+/, "").trim();
+    const sortMatch = args.match(/--sort\s+(.+?)(?:\s+--|$)/);
+    const sortKey = (sortMatch && SORT_OPTIONS[sortMatch[1].trim()]) ? sortMatch[1].trim() : defaultSort;
+    const term = args.replace(/--sort\s+.+/, "").trim();
 
     try {
       const params = new URLSearchParams({
@@ -252,7 +185,6 @@ export default {
       }
 
       const doFetch = context?.fetch ?? fetch;
-
       const res = await doFetch(
         `${prowlarrUrl}/api/v1/search?${params.toString()}`,
         { headers: { "X-Api-Key": apiKey, Accept: "application/json" } }
@@ -273,20 +205,11 @@ export default {
         };
       }
 
-      // Sort
       const sortFn = SORT_OPTIONS[sortKey]?.fn;
       if (sortFn) data = [...data].sort(sortFn);
 
-      // Resolve magnets for items that only have a .torrent download URL
-      const resolved = await Promise.all(
-        data.map(async (item) => {
-          if (item.magnetUrl || !item.downloadUrl) return null;
-          return torrentToMagnet(item.downloadUrl, item.title, doFetch);
-        })
-      );
-
       const sortLabel = sortKey !== "Default" ? ` \u2022 sorted by ${sortKey}` : "";
-      const results = data.map((item, i) => renderItem(item, resolved[i])).join("");
+      const results = data.map((item) => renderItem(item)).join("");
 
       return {
         title: `Prowlarr: ${term} \u2014 ${data.length} results${sortLabel}`,
