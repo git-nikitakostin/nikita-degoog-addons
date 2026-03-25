@@ -27,11 +27,10 @@ function renderItem(item) {
   const downloadUrl = item.downloadUrl || null;
   const infoUrl = item.infoUrl || item.guid || null;
 
-  // Primary link: prefer magnet, fall back to .torrent download, then info page
-  const primaryUrl = magnetUrl ?? downloadUrl ?? infoUrl ?? "#";
-  const primaryLabel = magnetUrl ? "🧲 magnet" : downloadUrl ? "⬇ torrent" : null;
+  // Title link: prefer magnet, fall back to .torrent download, then info page
+  const titleUrl = magnetUrl ?? downloadUrl ?? infoUrl ?? "#";
 
-  // Secondary link: tracker info page (only show if we already have a magnet/download as primary)
+  // Secondary link: tracker info page (only shown when title already points to magnet/download)
   const trackerUrl = (magnetUrl || downloadUrl) ? infoUrl : null;
 
   const parts = [];
@@ -40,9 +39,9 @@ function renderItem(item) {
   if (typeof item.size === "number" && item.size > 0)
     parts.push(formatBytes(item.size));
   if (typeof item.seeders === "number")
-    parts.push(`↑ ${item.seeders} seeders`);
+    parts.push(`\u2191 ${item.seeders} seeders`);
   if (typeof item.leechers === "number")
-    parts.push(`↓ ${item.leechers} leechers`);
+    parts.push(`\u2193 ${item.leechers} leechers`);
   if (item.publishDate)
     parts.push(new Date(item.publishDate).toLocaleDateString());
 
@@ -58,16 +57,15 @@ function renderItem(item) {
     .join("");
 
   const trackerLink = trackerUrl
-    ? `<a class="prowlarr-tracker-link" href="${escHtml(trackerUrl)}">torrent page ↗</a>`
+    ? `<a class="prowlarr-tracker-link" href="${escHtml(trackerUrl)}">torrent page \u2197</a>`
     : "";
 
   const data = {
     faviconSrc: PROWLARR_LOGO,
     cite: escHtml(item.indexer ?? prowlarrUrl),
-    itemUrl: escHtml(primaryUrl),
-    itemLabel: primaryLabel ? escHtml(primaryLabel) : escHtml(item.title ?? "(no title)"),
+    titleUrl: escHtml(titleUrl),
     title: escHtml(item.title ?? "(no title)"),
-    snippet: escHtml(parts.join(" · ") || ""),
+    snippet: escHtml(parts.join(" \u00b7 ") || ""),
     badges,
     trackerLink,
     thumbBlock: "",
@@ -98,7 +96,7 @@ export default {
       secret: true,
       required: true,
       placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-      description: "Found under Prowlarr → Settings → General → Security.",
+      description: "Found under Prowlarr \u2192 Settings \u2192 General \u2192 Security.",
     },
     {
       key: "categories",
@@ -133,7 +131,7 @@ export default {
     if (!prowlarrUrl || !apiKey) {
       return {
         title: "Prowlarr",
-        html: `<div class="command-result"><p>Prowlarr is not configured. Go to <a href="/settings">Settings → Plugins</a> to set your Prowlarr URL and API key.</p></div>`,
+        html: `<div class="command-result"><p>Prowlarr is not configured. Go to <a href="/settings">Settings \u2192 Plugins</a> to set your Prowlarr URL and API key.</p></div>`,
       };
     }
 
@@ -190,13 +188,13 @@ export default {
       const results = data.map((item) => renderItem(item)).join("");
 
       return {
-        title: `Prowlarr: ${term} — ${data.length} results`,
+        title: `Prowlarr: ${term} \u2014 ${data.length} results`,
         html: `<div class="command-result">${results}</div>`,
       };
     } catch {
       return {
         title: "Prowlarr",
-        html: `<div class="command-result"><p>Failed to connect to Prowlarr. Check your configuration in <a href="/settings">Settings → Plugins</a>.</p></div>`,
+        html: `<div class="command-result"><p>Failed to connect to Prowlarr. Check your configuration in <a href="/settings">Settings \u2192 Plugins</a>.</p></div>`,
       };
     }
   },
