@@ -27,11 +27,19 @@ function renderItem(item) {
   const downloadUrl = item.downloadUrl || null;
   const infoUrl = item.infoUrl || item.guid || null;
 
-  // Title link: prefer magnet, fall back to .torrent download, then info page
-  const titleUrl = magnetUrl ?? downloadUrl ?? infoUrl ?? "#";
+  // Title links to the tracker info page
+  const titleUrl = infoUrl ?? magnetUrl ?? downloadUrl ?? "#";
 
-  // Secondary link: tracker info page (only shown when title already points to magnet/download)
-  const trackerUrl = (magnetUrl || downloadUrl) ? infoUrl : null;
+  // Action buttons — only rendered if the URL exists
+  const magnetBtn = magnetUrl
+    ? `<a class="prowlarr-btn prowlarr-btn-magnet" href="${escHtml(magnetUrl)}">\uD83E\uDDF2 Magnet</a>`
+    : "";
+  const torrentBtn = downloadUrl
+    ? `<a class="prowlarr-btn prowlarr-btn-torrent" href="${escHtml(downloadUrl)}">\u2B07 Torrent</a>`
+    : "";
+  const actionButtons = (magnetBtn || torrentBtn)
+    ? `<div class="prowlarr-actions">${magnetBtn}${torrentBtn}</div>`
+    : "";
 
   const parts = [];
   if (item.categoryDesc || item.category)
@@ -56,18 +64,14 @@ function renderItem(item) {
     .filter(Boolean)
     .join("");
 
-  const trackerLink = trackerUrl
-    ? `<a class="prowlarr-tracker-link" href="${escHtml(trackerUrl)}">torrent page \u2197</a>`
-    : "";
-
   const data = {
     faviconSrc: PROWLARR_LOGO,
     cite: escHtml(item.indexer ?? prowlarrUrl),
     titleUrl: escHtml(titleUrl),
     title: escHtml(item.title ?? "(no title)"),
+    actionButtons,
     snippet: escHtml(parts.join(" \u00b7 ") || ""),
     badges,
-    trackerLink,
     thumbBlock: "",
   };
 

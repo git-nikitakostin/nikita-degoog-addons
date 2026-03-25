@@ -1,18 +1,32 @@
-.prowlarr-title-row {
+.prowlarr-actions {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  gap: 6px;
+  margin: 4px 0 2px;
   flex-wrap: wrap;
 }
 
-.prowlarr-tracker-link {
+.prowlarr-btn {
   font-size: 13px;
   white-space: nowrap;
-  flex-shrink: 0;
   text-decoration: none;
-  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
-.prowlarr-tracker-link:hover {
+.prowlarr-btn-magnet {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+
+.prowlarr-btn-magnet:hover {
+  opacity: 0.85;
+}
+
+.prowlarr-btn-torrent {
+  color: var(--text-secondary);
+  border: 1px solid var(--border, #d1d5db);
+}
+
+.prowlarr-btn-torrent:hover {
   color: var(--text-primary);
 }
