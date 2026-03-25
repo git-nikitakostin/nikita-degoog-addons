@@ -8,7 +8,7 @@
       "path": "plugins/prowlarr",
       "name": "Prowlarr",
       "description": "Search your Prowlarr indexers directly from degoog via !prowlarr. Requires a running Prowlarr instance and API key.",
-      "version": "1.0.0",
+      "version": "1.4.0",
       "type": "command"
     }
   ],
