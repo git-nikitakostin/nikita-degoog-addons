@@ -1,0 +1,43 @@
+.prowlarr-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
+
+.prowlarr-title-text {
+  font-size: 18px;
+  color: var(--text-primary);
+  font-weight: 500;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.prowlarr-primary-link,
+.prowlarr-tracker-link {
+  font-size: 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-decoration: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.prowlarr-primary-link {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+
+.prowlarr-primary-link:hover {
+  opacity: 0.85;
+}
+
+.prowlarr-tracker-link {
+  color: var(--text-secondary);
+  border: 1px solid var(--border, #d1d5db);
+}
+
+.prowlarr-tracker-link:hover {
+  color: var(--text-primary);
+}

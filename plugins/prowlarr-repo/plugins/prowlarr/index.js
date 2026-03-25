@@ -4,7 +4,6 @@ const PROWLARR_LOGO =
 let prowlarrUrl = "";
 let apiKey = "";
 let categories = [];
-let limit = 100;
 let template = "";
 
 function escHtml(s) {
@@ -27,7 +26,13 @@ function renderItem(item) {
   const magnetUrl = item.magnetUrl || null;
   const downloadUrl = item.downloadUrl || null;
   const infoUrl = item.infoUrl || item.guid || null;
-  const resultUrl = magnetUrl ?? downloadUrl ?? infoUrl ?? "#";
+
+  // Primary link: prefer magnet, fall back to .torrent download, then info page
+  const primaryUrl = magnetUrl ?? downloadUrl ?? infoUrl ?? "#";
+  const primaryLabel = magnetUrl ? "🧲 magnet" : downloadUrl ? "⬇ torrent" : null;
+
+  // Secondary link: tracker info page (only show if we already have a magnet/download as primary)
+  const trackerUrl = (magnetUrl || downloadUrl) ? infoUrl : null;
 
   const parts = [];
   if (item.categoryDesc || item.category)
@@ -52,13 +57,19 @@ function renderItem(item) {
     .filter(Boolean)
     .join("");
 
+  const trackerLink = trackerUrl
+    ? `<a class="prowlarr-tracker-link" href="${escHtml(trackerUrl)}">torrent page ↗</a>`
+    : "";
+
   const data = {
     faviconSrc: PROWLARR_LOGO,
-    cite: escHtml(prowlarrUrl),
-    itemUrl: escHtml(resultUrl),
+    cite: escHtml(item.indexer ?? prowlarrUrl),
+    itemUrl: escHtml(primaryUrl),
+    itemLabel: primaryLabel ? escHtml(primaryLabel) : escHtml(item.title ?? "(no title)"),
     title: escHtml(item.title ?? "(no title)"),
     snippet: escHtml(parts.join(" · ") || ""),
     badges,
+    trackerLink,
     thumbBlock: "",
   };
 
@@ -97,13 +108,6 @@ export default {
       description:
         "Comma-separated Newznab category IDs to filter results. Leave blank to search all. Common: 2000 Movies, 5000 TV, 3000 Audio, 4000 PC, 7000 Books.",
     },
-    {
-      key: "limit",
-      label: "Max results",
-      type: "select",
-      options: ["25", "50", "100"],
-      description: "Maximum number of results returned per query.",
-    },
   ],
 
   init(ctx) {
@@ -119,7 +123,6 @@ export default {
           .map((c) => parseInt(c.trim(), 10))
           .filter((n) => !isNaN(n))
       : [];
-    limit = parseInt(settings.limit, 10) || 100;
   },
 
   async isConfigured() {
@@ -143,14 +146,12 @@ export default {
 
     try {
       const term = args.trim();
-      const page = context?.page ?? 1;
-      const offset = limit * (page - 1);
 
       const params = new URLSearchParams({
         query: term,
         type: "search",
-        limit: String(limit),
-        offset: String(offset),
+        limit: "100",
+        offset: "0",
         apikey: apiKey,
       });
 
@@ -187,14 +188,10 @@ export default {
       }
 
       const results = data.map((item) => renderItem(item)).join("");
-      const totalPages = Math.ceil(data.length / limit) || 1;
-      const pageInfo =
-        totalPages > 1 ? ` — Page ${page} of ${totalPages}` : "";
 
       return {
-        title: `Prowlarr: ${term} — ${data.length} results${pageInfo}`,
+        title: `Prowlarr: ${term} — ${data.length} results`,
         html: `<div class="command-result">${results}</div>`,
-        totalPages,
       };
     } catch {
       return {
