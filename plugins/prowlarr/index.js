@@ -123,7 +123,7 @@ export default {
   },
 
   async isConfigured() {
-    return !!(prowlarrUrl && apiKey);
+    return true;
   },
 
   async execute(args, context) {
@@ -160,12 +160,15 @@ export default {
         }
       }
 
-      const res = await fetch(`${prowlarrUrl}/api/v1/search?${params.toString()}`, {
-        headers: {
-          "X-Api-Key": apiKey,
-          Accept: "application/json",
-        },
-      });
+      const res = await fetch(
+        `${prowlarrUrl}/api/v1/search?${params.toString()}`,
+        {
+          headers: {
+            "X-Api-Key": apiKey,
+            Accept: "application/json",
+          },
+        }
+      );
 
       if (!res.ok) {
         return {
@@ -185,7 +188,8 @@ export default {
 
       const results = data.map((item) => renderItem(item)).join("");
       const totalPages = Math.ceil(data.length / limit) || 1;
-      const pageInfo = totalPages > 1 ? ` — Page ${page} of ${totalPages}` : "";
+      const pageInfo =
+        totalPages > 1 ? ` — Page ${page} of ${totalPages}` : "";
 
       return {
         title: `Prowlarr: ${term} — ${data.length} results${pageInfo}`,
@@ -195,7 +199,7 @@ export default {
     } catch {
       return {
         title: "Prowlarr",
-        html: `<div class="command-result"><p>Failed to connect to Prowlarr. Check your configuration.</p></div>`,
+        html: `<div class="command-result"><p>Failed to connect to Prowlarr. Check your configuration in <a href="/settings">Settings → Plugins</a>.</p></div>`,
       };
     }
   },

@@ -2,7 +2,7 @@
     "name": "niks-degoog-extensions",
     "description": "My plugins and themes for degoog search.",
     "repo-image": "https://raw.githubusercontent.com/git-nikitakostin/nikita-degoog-addons/refs/heads/main/icon.jpg",
-    "author": "nikita",
+    "author": "nikitakostin",
      "plugins": [
     {
       "path": "plugins/prowlarr",
