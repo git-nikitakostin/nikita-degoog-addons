@@ -98,16 +98,17 @@ function extractIconCandidates(html, pageUrl) {
     if (resolved) candidates.push({ url: resolved, isApple, isShortcut, isSvg, dim });
   }
 
-  // Sort to match browser tab icon selection priority:
-  //   SVG icons first (scalable) > regular icons by size desc > shortcut icon > apple-touch-icon
+  // Sort to match what the browser actually renders in colour in the tab:
+  //   regular icon PNG/ICO by size desc > shortcut icon > SVG (often monochrome) > apple-touch-icon
+  // SVG favicons are frequently monochrome/mask variants — put them after PNGs.
   candidates.sort((a, b) => {
-    // SVG always wins
-    if (a.isSvg !== b.isSvg) return a.isSvg ? -1 : 1;
-    // apple-touch-icon goes last
+    // apple-touch-icon always last
     if (a.isApple !== b.isApple) return a.isApple ? 1 : -1;
-    // shortcut icon goes before apple but after regular
+    // SVG goes after non-SVG regular icons (often monochrome)
+    if (a.isSvg !== b.isSvg) return a.isSvg ? 1 : -1;
+    // shortcut icon after regular icon
     if (a.isShortcut !== b.isShortcut) return a.isShortcut ? 1 : -1;
-    // Among same type, prefer larger declared size
+    // Among same tier, larger declared size wins
     return b.dim - a.dim;
   });
 
