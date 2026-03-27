@@ -17,7 +17,6 @@ function parseShortcutList(rawList) {
     if (!entry || typeof entry !== "string") continue;
     const trimmed = entry.trim();
     if (!trimmed) continue;
-    // Format: "Label|https://url|#color" or "Label|https://url"
     const parts = trimmed.split("|");
     if (parts.length < 2) continue;
     const label = parts[0].trim();
@@ -36,31 +35,7 @@ function parseShortcutList(rawList) {
 
 // ─── Icon fetching helpers ────────────────────────────────────────────────────
 
-const FETCH_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-};
-
-// Content-types we accept as icons (much broader than the core proxy)
-const IMAGE_CONTENT_TYPES = [
-  "image/x-icon",
-  "image/vnd.microsoft.icon",
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-  "image/avif",
-  "image/bmp",
-  // Some servers return this for .ico
-  "application/octet-stream",
-];
-
-function isImageContentType(ct) {
-  if (!ct) return false;
-  const lower = ct.split(";")[0].trim().toLowerCase();
-  return IMAGE_CONTENT_TYPES.some(t => lower.startsWith(t));
-}
+const FETCH_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 function decodeEntities(str) {
   return str
@@ -72,25 +47,21 @@ function decodeEntities(str) {
     .replace(/&apos;/g, "'");
 }
 
-// Resolve a relative icon href against the page's origin
+// Resolve a relative URL against the page URL
 function resolveUrl(href, pageUrl) {
+  href = (href || "").trim();
   if (!href) return null;
-  href = href.trim();
-  try {
-    // new URL handles absolute, protocol-relative, and relative paths
-    return new URL(href, pageUrl).href;
-  } catch {
-    return null;
-  }
+  try { return new URL(href, pageUrl).href; } catch { return null; }
 }
 
-// Extract icon candidates from HTML, ordered best-first:
-// apple-touch-icon (largest) > icon/shortcut icon (largest) > /favicon.ico
+// Extract icon candidates from HTML <link> tags, ordered best-first.
 function extractIconCandidates(html, pageUrl) {
+  // Match all <link ...> or <link ... />
   const linkRe  = /<link([^>]+?)(?:\/>|>)/gi;
-  const relRe   = /\brel\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i;
-  const hrefRe  = /\bhref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i;
-  const sizesRe = /\bsizes\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i;
+  // Allow quoted or unquoted attribute values
+  const relRe   = /\brel\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
+  const hrefRe  = /\bhref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
+  const sizesRe = /\bsizes\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
 
   const candidates = [];
   let m;
@@ -100,14 +71,13 @@ function extractIconCandidates(html, pageUrl) {
     const hrefMatch = hrefRe.exec(attrs);
     if (!relMatch || !hrefMatch) continue;
 
-    const rel  = (relMatch[1] || relMatch[2] || relMatch[3] || "").toLowerCase();
-    const href = hrefMatch[1] || hrefMatch[2] || hrefMatch[3] || "";
-    if (!rel.includes("icon") || !href) continue;
+    const rel  = (relMatch[1]  || relMatch[2]  || relMatch[3]  || "").toLowerCase().trim();
+    const href = (hrefMatch[1] || hrefMatch[2] || hrefMatch[3] || "").trim();
+    if (!href || !rel.includes("icon")) continue;
 
     const sizesMatch = sizesRe.exec(attrs);
     const sizes = sizesMatch ? (sizesMatch[1] || sizesMatch[2] || sizesMatch[3] || "") : "";
     const isApple = rel.includes("apple-touch-icon");
-    // Parse the largest pixel dimension from sizes string (e.g. "32x32 64x64" → 64)
     const dim = sizes
       ? Math.max(0, ...sizes.trim().split(/\s+/).map(s => parseInt(s) || 0))
       : 0;
@@ -116,19 +86,21 @@ function extractIconCandidates(html, pageUrl) {
     if (resolved) candidates.push({ url: resolved, isApple, dim });
   }
 
-  // Sort: apple-touch-icon first, then by declared size descending
+  // Sort: apple-touch-icon first, then largest declared size
   candidates.sort((a, b) => {
     if (a.isApple !== b.isApple) return a.isApple ? -1 : 1;
     return b.dim - a.dim;
   });
 
-  // Always append /favicon.ico as last resort
+  // Always include /favicon.ico as last resort
   try {
-    const origin = new URL(pageUrl).origin;
-    candidates.push({ url: origin + "/favicon.ico", isApple: false, dim: 0 });
+    const faviconIco = new URL(pageUrl).origin + "/favicon.ico";
+    if (!candidates.some(c => c.url === faviconIco)) {
+      candidates.push({ url: faviconIco, isApple: false, dim: 0 });
+    }
   } catch {}
 
-  // Deduplicate by URL
+  // Deduplicate
   const seen = new Set();
   return candidates.filter(c => {
     if (seen.has(c.url)) return false;
@@ -137,53 +109,68 @@ function extractIconCandidates(html, pageUrl) {
   });
 }
 
-// Try fetching each candidate URL in order; return { url, buffer, contentType }
-// for the first one that responds with actual image bytes, or null.
-async function fetchFirstWorkingIcon(candidates) {
-  for (const candidate of candidates) {
-    try {
-      const res = await fetch(candidate.url, {
-        headers: { ...FETCH_HEADERS, Accept: "image/*,*/*;q=0.8" },
-        signal: AbortSignal.timeout(4000),
-        redirect: "follow",
-      });
-      if (!res.ok) continue;
-
-      const ct = res.headers.get("content-type") || "";
-
-      // Check content-type — but also accept unknown for .ico/.png paths
-      const urlLower = candidate.url.toLowerCase().split("?")[0];
-      const looksLikeImage = /\.(ico|png|jpg|jpeg|gif|webp|svg|avif|bmp)$/.test(urlLower);
-
-      if (!isImageContentType(ct) && !looksLikeImage) continue;
-
-      const buf = await res.arrayBuffer();
-      if (buf.byteLength === 0) continue;
-
-      // Detect real content type from magic bytes if server didn't tell us
-      let finalCt = ct.split(";")[0].trim() || "image/x-icon";
-      if (!isImageContentType(finalCt) || finalCt === "application/octet-stream") {
-        finalCt = sniffImageType(new Uint8Array(buf)) || finalCt;
-      }
-
-      return { url: candidate.url, buffer: buf, contentType: finalCt };
-    } catch {
-      // timeout / network error — try next candidate
-    }
-  }
-  return null;
-}
-
-// Minimal magic-byte sniffing for common image formats
+// Minimal magic-byte sniffing
 function sniffImageType(bytes) {
+  if (!bytes || bytes.length < 4) return null;
   if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
   if (bytes[0] === 0xFF && bytes[1] === 0xD8) return "image/jpeg";
   if (bytes[0] === 0x47 && bytes[1] === 0x49) return "image/gif";
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return "image/webp";
   if (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0x00) return "image/x-icon";
-  // SVG starts with "<svg" or "<?xml" or "<!" (after possible BOM/whitespace)
-  const head = String.fromCharCode(...bytes.slice(0, 32));
-  if (/<svg/i.test(head) || /^<\?xml/i.test(head.trimStart())) return "image/svg+xml";
+  const head = String.fromCharCode(...Array.from(bytes.slice(0, 64)));
+  if (/<svg/i.test(head) || head.trimStart().startsWith("<?xml")) return "image/svg+xml";
+  return null;
+}
+
+// Fetch a single URL and return { buffer, contentType } if it looks like an image, else null.
+async function tryFetchIcon(url) {
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        "User-Agent": FETCH_UA,
+        "Accept": "image/*,*/*;q=0.5",
+      },
+      signal: AbortSignal.timeout(5000),
+      redirect: "follow",
+    });
+  } catch {
+    return null; // network/timeout
+  }
+
+  if (!res.ok) return null;
+
+  let buf;
+  try { buf = await res.arrayBuffer(); } catch { return null; }
+  if (!buf || buf.byteLength === 0) return null;
+
+  const bytes = new Uint8Array(buf);
+  const ct = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+
+  // Accept any content-type that looks like an image, OR sniff the bytes directly.
+  // We intentionally do NOT reject on unknown content-type — many servers are misconfigured.
+  const sniffed = sniffImageType(bytes);
+  const knownImageType = [
+    "image/", "application/octet-stream",
+  ].some(t => ct.startsWith(t));
+
+  if (!sniffed && !knownImageType) {
+    // One more check: if the URL path ends with a known image extension, trust it
+    const path = url.split("?")[0].toLowerCase();
+    const hasImageExt = /\.(ico|png|jpg|jpeg|gif|webp|svg|avif|bmp)$/.test(path);
+    if (!hasImageExt) return null;
+  }
+
+  const finalCt = sniffed || (ct && ct !== "application/octet-stream" ? ct : "image/x-icon");
+  return { buffer: buf, contentType: finalCt };
+}
+
+// Try each candidate in order, return the first that succeeds.
+async function fetchBestIcon(candidates) {
+  for (const c of candidates) {
+    const result = await tryFetchIcon(c.url);
+    if (result) return { ...result, url: c.url };
+  }
   return null;
 }
 
@@ -227,7 +214,7 @@ export default {
   async execute() {
     return {
       title: "Shortcuts",
-      html: `<div class="command-result"><p>The Shortcuts plugin adds bookmark tiles to the home page. No search command is provided — manage your shortcuts directly on the home page.</p></div>`,
+      html: `<div class="command-result"><p>The Shortcuts plugin adds bookmark tiles to the home page. Manage your shortcuts directly on the home page.</p></div>`,
     };
   },
 };
@@ -247,15 +234,15 @@ export const routes = [
 
   {
     // GET /api/plugin/shortcuts/site-info?url=https://...
-    // Fetches the page server-side, returns { title, iconCandidates[] }
-    // iconCandidates is an ordered list of icon URLs to try (best first).
+    // Returns { title, faviconUrl } where faviconUrl is the best icon URL found,
+    // already verified to be fetchable from this server.
     method: "get",
     path: "/site-info",
     handler: async (req) => {
       const reqUrl = new URL(req.url);
       const target = reqUrl.searchParams.get("url");
       if (!target) {
-        return new Response(JSON.stringify({ error: "Missing url param" }), {
+        return new Response(JSON.stringify({ error: "Missing url" }), {
           status: 400, headers: { "Content-Type": "application/json" },
         });
       }
@@ -270,89 +257,69 @@ export const routes = [
         });
       }
 
+      let html = "";
       try {
         const res = await fetch(pageUrl.href, {
-          headers: FETCH_HEADERS,
+          headers: { "User-Agent": FETCH_UA, "Accept": "text/html" },
           signal: AbortSignal.timeout(6000),
           redirect: "follow",
         });
-
-        if (!res.ok) {
-          // Page unreachable but we can still try /favicon.ico
-          const origin = pageUrl.origin;
-          return new Response(JSON.stringify({
-            title: null,
-            iconCandidates: [origin + "/favicon.ico"],
-          }), { headers: { "Content-Type": "application/json" } });
+        if (res.ok) {
+          const reader = res.body.getReader();
+          let bytesRead = 0;
+          while (bytesRead < 16384) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) { html += new TextDecoder().decode(value); bytesRead += value.byteLength; }
+          }
+          reader.cancel().catch(() => {});
         }
+      } catch {}
 
-        // Read first 16 KB — enough for <head>
-        const reader = res.body.getReader();
-        let html = "";
-        let bytesRead = 0;
-        while (bytesRead < 16384) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) { html += new TextDecoder().decode(value); bytesRead += value.byteLength; }
-        }
-        reader.cancel().catch(() => {});
+      const titleMatch = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
+      const title = titleMatch ? decodeEntities(titleMatch[1].trim()) : null;
 
-        const titleMatch = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
-        const title = titleMatch ? decodeEntities(titleMatch[1].trim()) : null;
+      // Extract icon candidates from the HTML, then verify each one server-side.
+      // We return the raw URL of the first working icon so the client can request
+      // it through /icon — no double-encoding, no broken proxy chains.
+      const candidates = html ? extractIconCandidates(html, pageUrl.href)
+        : [{ url: pageUrl.origin + "/favicon.ico" }];
 
-        const candidates = extractIconCandidates(html, pageUrl.href);
-        const iconCandidates = candidates.map(c => c.url);
+      const best = await fetchBestIcon(candidates);
+      const faviconUrl = best ? best.url : null;
 
-        return new Response(JSON.stringify({ title, iconCandidates }), {
-          headers: { "Content-Type": "application/json" },
-        });
-      } catch {
-        return new Response(JSON.stringify({ title: null, iconCandidates: [] }), {
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+      return new Response(JSON.stringify({ title, faviconUrl }), {
+        headers: { "Content-Type": "application/json" },
+      });
     },
   },
 
   {
     // GET /api/plugin/shortcuts/icon?url=https://...
-    // Tries the given URL (and falls back through candidates list via ?candidates=url1,url2)
-    // Fetches server-side and streams the image bytes back to the browser.
-    // This completely bypasses the core /api/proxy/image restrictions.
+    // Fetches the given icon URL server-side and pipes it to the browser.
+    // Bypasses the core proxy's strict content-type allowlist entirely.
     method: "get",
     path: "/icon",
     handler: async (req) => {
-      const reqUrl = new URL(req.url);
-      const primaryUrl = reqUrl.searchParams.get("url");
-      const extraRaw   = reqUrl.searchParams.get("candidates") || "";
+      const url = new URL(req.url).searchParams.get("url");
+      if (!url) return new Response("Missing url", { status: 400 });
 
-      if (!primaryUrl) {
-        return new Response("Missing url", { status: 400 });
-      }
-
-      // Build candidate list: primary first, then any extras
-      const extras = extraRaw ? extraRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
-      const allCandidates = [primaryUrl, ...extras]
-        .map(u => { try { return new URL(u).href; } catch { return null; } })
-        .filter(Boolean)
-        .filter(u => /^https?:\/\//i.test(u));
-
-      if (allCandidates.length === 0) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+        if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+      } catch {
         return new Response("Invalid URL", { status: 400 });
       }
 
-      const candidates = allCandidates.map(u => ({ url: u, isApple: false, dim: 0 }));
-      const result = await fetchFirstWorkingIcon(candidates);
-
-      if (!result) {
-        return new Response("Icon not found", { status: 404 });
-      }
+      const result = await tryFetchIcon(parsed.href);
+      if (!result) return new Response("Icon not found", { status: 404 });
 
       return new Response(result.buffer, {
         status: 200,
         headers: {
           "Content-Type": result.contentType,
-          "Cache-Control": "public, max-age=604800", // 1 week
+          "Cache-Control": "public, max-age=604800",
           "X-Content-Type-Options": "nosniff",
         },
       });

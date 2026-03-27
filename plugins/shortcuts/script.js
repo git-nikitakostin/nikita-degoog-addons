@@ -49,25 +49,37 @@
   }
 
   // Returns the src URL used to display the shortcut icon in a tile.
-  // All requests go through /api/plugin/shortcuts/icon which runs server-side,
-  // so it can reach private-network hosts and has permissive content-type handling.
+  // Always routed through /api/plugin/shortcuts/icon (server-side fetch,
+  // reaches private networks, permissive content-type handling).
   //
   // Priority:
-  //   1. sc.iconUrl  — user-supplied custom icon URL
-  //   2. sc.iconSrc  — pre-built /icon?url=...&candidates=... from site-info (best)
-  //   3. sc.faviconUrl — raw primary icon URL discovered from site-info
-  //   4. /favicon.ico on the site origin (last resort)
+  //   1. sc.iconUrl    — user-supplied custom icon URL
+  //   2. sc.faviconUrl — raw icon URL discovered by site-info
+  //   3. /favicon.ico on the site origin (last resort)
   function getIconSrc(sc) {
+    var raw = null;
+
     if (sc.iconUrl && sc.iconUrl.trim()) {
-      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(sc.iconUrl.trim());
+      raw = sc.iconUrl.trim();
+    } else if (sc.faviconUrl && sc.faviconUrl.trim()) {
+      raw = sc.faviconUrl.trim();
     }
-    if (sc.iconSrc && sc.iconSrc.trim()) {
-      // Already a fully-formed /icon?... request, use as-is
-      return sc.iconSrc.trim();
+
+    // Sanitize stale data: old versions stored a /api/proxy/image?url=... path
+    // in faviconUrl. Unwrap it back to the real URL.
+    if (raw && raw.startsWith("/api/proxy/image?url=")) {
+      try { raw = decodeURIComponent(raw.slice("/api/proxy/image?url=".length)); } catch (_) { raw = null; }
     }
-    if (sc.faviconUrl && sc.faviconUrl.trim()) {
-      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(sc.faviconUrl.trim());
+    // Same for old /api/plugin/shortcuts/icon?url=... stored in faviconUrl
+    if (raw && raw.startsWith("/api/plugin/shortcuts/icon?url=")) {
+      try { raw = decodeURIComponent(raw.slice("/api/plugin/shortcuts/icon?url=".length)); } catch (_) { raw = null; }
     }
+
+    if (raw) {
+      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(raw);
+    }
+
+    // Last resort: /favicon.ico
     try {
       var origin = new URL(sc.url).origin;
       return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(origin + "/favicon.ico");
@@ -338,10 +350,9 @@
       if (!url || url === lastFetchedUrl) return;
       lastFetchedUrl = url;
 
-      var userTypedLabel = labelInput.value.trim();
-      var userTypedIcon  = iconInput.value.trim();
+      var userTypedIcon = iconInput.value.trim();
 
-      // Show a placeholder via our own /icon route immediately while we wait
+      // Show /favicon.ico immediately as a placeholder while site-info runs
       if (!userTypedIcon) {
         try {
           var origin = new URL(url).origin;
@@ -351,33 +362,23 @@
         } catch (_) {}
       }
 
-      if (!userTypedLabel) labelHint.style.display = "inline";
+      if (!labelInput.value.trim()) labelHint.style.display = "inline";
 
       fetch("/api/plugin/shortcuts/site-info?url=" + encodeURIComponent(url))
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
           labelHint.style.display = "none";
 
-          // Auto-fill name only if user hasn't typed one
           if (data.title && !labelInput.value.trim()) {
             labelInput.value = data.title.slice(0, 32);
           }
 
-          // iconCandidates is an ordered list of URLs to try, best first.
-          // Build a single /icon?url=<primary>&candidates=<rest> request so
-          // the server tries them in order and returns the first that works.
-          var candidates = Array.isArray(data.iconCandidates) ? data.iconCandidates : [];
-          if (candidates.length > 0 && !iconInput.value.trim()) {
-            var primary = candidates[0];
-            var rest    = candidates.slice(1);
-            var iconSrc = "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(primary);
-            if (rest.length > 0) {
-              iconSrc += "&candidates=" + encodeURIComponent(rest.join(","));
-            }
-            showFaviconPreview(iconSrc);
-            // Store the best candidate URL so it can be saved on the shortcut
-            modal._pendingFaviconUrl = primary;
-            modal._pendingIconSrc    = iconSrc;
+          // faviconUrl is the raw verified icon URL (already confirmed fetchable server-side)
+          if (data.faviconUrl && !iconInput.value.trim()) {
+            showFaviconPreview(
+              "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(data.faviconUrl)
+            );
+            modal._pendingFaviconUrl = data.faviconUrl;
           }
         })
         .catch(function () { labelHint.style.display = "none"; });
@@ -421,10 +422,7 @@
 
       if (!labelVal || !urlVal) return;
 
-      // faviconUrl = the raw icon URL (primary candidate from site-info).
-      // iconSrc    = the /icon?url=...&candidates=... string used by getIconSrc().
       var faviconVal = iconVal ? null : (modal._pendingFaviconUrl || null);
-      var iconSrcVal = iconVal ? null : (modal._pendingIconSrc    || null);
 
       if (currentEditId) {
         for (var i = 0; i < shortcuts.length; i++) {
@@ -433,7 +431,6 @@
             shortcuts[i].url        = urlVal;
             shortcuts[i].iconUrl    = iconVal;
             shortcuts[i].faviconUrl = iconVal ? null : (faviconVal || shortcuts[i].faviconUrl);
-            shortcuts[i].iconSrc    = iconVal ? null : (iconSrcVal || shortcuts[i].iconSrc);
             shortcuts[i].iconSize   = iconSzVal;
             shortcuts[i].color      = colorFinal;
             break;
@@ -446,7 +443,6 @@
           url:        urlVal,
           iconUrl:    iconVal,
           faviconUrl: faviconVal,
-          iconSrc:    iconSrcVal,
           iconSize:   iconSzVal,
           color:      colorFinal,
         });
@@ -469,7 +465,6 @@
 
     currentEditId = sc ? sc.id : null;
     modal._pendingFaviconUrl = null;
-    modal._pendingIconSrc    = null;
 
     var titleEl      = modal.querySelector("#sc-modal-title");
     var urlInput     = modal.querySelector("#sc-input-url");
@@ -509,7 +504,6 @@
         urlPreview.style.display = "none";
       }
       modal._pendingFaviconUrl = sc.faviconUrl || null;
-      modal._pendingIconSrc    = sc.iconSrc    || null;
     } else {
       titleEl.textContent  = "Add Shortcut";
       urlInput.value       = "";
