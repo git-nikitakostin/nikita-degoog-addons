@@ -26,23 +26,6 @@
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  function escHtml(str) {
-    var el = document.createElement("span");
-    el.textContent = String(str);
-    return el.innerHTML;
-  }
-
-  function getFaviconUrl(url) {
-    try {
-      var hostname = new URL(url).hostname;
-      return "/api/proxy/image?url=" + encodeURIComponent(
-        "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
-      );
-    } catch (_) {
-      return "";
-    }
-  }
-
   function getInitials(label) {
     if (!label) return "?";
     var words = label.trim().split(/\s+/);
@@ -51,14 +34,12 @@
   }
 
   function getContrastColor(hex) {
-    // Return black or white depending on background luminance
     if (!hex) return "#ffffff";
     var c = hex.replace("#", "");
     if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
     var r = parseInt(c.slice(0,2), 16);
     var g = parseInt(c.slice(2,4), 16);
     var b = parseInt(c.slice(4,6), 16);
-    // Relative luminance
     var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
     return lum > 0.5 ? "#000000" : "#ffffff";
   }
@@ -67,26 +48,44 @@
     return Math.random().toString(36).slice(2, 10);
   }
 
+  // Returns the URL to use for showing the icon of a shortcut.
+  // Priority: custom icon > stored faviconUrl from site-info > Google S2 fallback
+  function getIconSrc(sc) {
+    if (sc.iconUrl && sc.iconUrl.trim()) return sc.iconUrl.trim();
+    if (sc.faviconUrl && sc.faviconUrl.trim()) {
+      // Proxy through degoog to handle private-network URLs
+      return "/api/proxy/image?url=" + encodeURIComponent(sc.faviconUrl.trim());
+    }
+    // Google S2 last-resort (only works for public sites)
+    try {
+      var hostname = new URL(sc.url).hostname;
+      return "/api/proxy/image?url=" + encodeURIComponent(
+        "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
+      );
+    } catch (_) { return ""; }
+  }
+
   // ─── Settings ─────────────────────────────────────────────────────────────
 
+  // Default true so the add button shows before settings load,
+  // but we won't render until after settings are fetched.
   var pluginSettings = { showAddButton: true, openInNewTab: false };
 
   function loadPluginSettings() {
-    // Read settings from the <meta> tags injected by the plugin or from
-    // data attributes, but since we can't read plugin settings directly
-    // in the browser we fetch them from the extension API.
     return fetch("/api/extensions")
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (extensions) {
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (data) {
+        // Response shape: { engines: [...], plugins: [...], themes: [...] }
+        var plugins = (data && Array.isArray(data.plugins)) ? data.plugins : [];
         var ext = null;
-        if (Array.isArray(extensions)) {
-          for (var i = 0; i < extensions.length; i++) {
-            if (extensions[i].id === "plugin-shortcuts") { ext = extensions[i]; break; }
-          }
+        for (var i = 0; i < plugins.length; i++) {
+          if (plugins[i].id === "plugin-shortcuts") { ext = plugins[i]; break; }
         }
         if (ext && ext.settings) {
-          pluginSettings.showAddButton  = ext.settings.showAddButton  !== "false";
-          pluginSettings.openInNewTab   = ext.settings.openInNewTab   === "true";
+          // toggles are stored as "true"/"false" strings; unset defaults to true
+          var rawShow = ext.settings.showAddButton;
+          pluginSettings.showAddButton = (rawShow === undefined || rawShow === null || rawShow === "true");
+          pluginSettings.openInNewTab  = ext.settings.openInNewTab === "true";
         }
       })
       .catch(function () {});
@@ -106,28 +105,25 @@
       tile.target = "_blank";
       tile.rel = "noopener";
     }
-    tile.title = escHtml(sc.label);
+    tile.title = sc.label;
 
     // Icon container
     var iconWrap = document.createElement("div");
     iconWrap.className = "sc-tile-icon";
-    if (sc.color) {
-      iconWrap.style.background = sc.color;
-    }
+    if (sc.color) iconWrap.style.background = sc.color;
 
-    // Favicon image with fallback to initials
+    // Icon image
     var img = document.createElement("img");
     img.className = "sc-tile-favicon";
-    img.src = getFaviconUrl(sc.url);
+    img.src = getIconSrc(sc);
     img.alt = "";
     img.loading = "lazy";
 
+    // Initials fallback
     var initials = document.createElement("span");
     initials.className = "sc-tile-initials";
     initials.textContent = getInitials(sc.label);
-    if (sc.color) {
-      initials.style.color = getContrastColor(sc.color);
-    }
+    if (sc.color) initials.style.color = getContrastColor(sc.color);
 
     img.onerror = function () {
       img.style.display = "none";
@@ -137,9 +133,9 @@
     iconWrap.appendChild(img);
     iconWrap.appendChild(initials);
 
-    var label = document.createElement("span");
-    label.className = "sc-tile-label";
-    label.textContent = sc.label;
+    var labelEl = document.createElement("span");
+    labelEl.className = "sc-tile-label";
+    labelEl.textContent = sc.label;
 
     // Edit button (shown on hover)
     var editBtn = document.createElement("button");
@@ -156,9 +152,8 @@
     });
 
     tile.appendChild(iconWrap);
-    tile.appendChild(label);
+    tile.appendChild(labelEl);
     tile.appendChild(editBtn);
-
     return tile;
   }
 
@@ -172,28 +167,22 @@
     iconWrap.className = "sc-tile-icon sc-tile-add-icon";
     iconWrap.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
-    var label = document.createElement("span");
-    label.className = "sc-tile-label";
-    label.textContent = "Add";
+    var labelEl = document.createElement("span");
+    labelEl.className = "sc-tile-label";
+    labelEl.textContent = "Add";
 
     tile.appendChild(iconWrap);
-    tile.appendChild(label);
-
-    tile.addEventListener("click", function () {
-      openModal(null);
-    });
-
+    tile.appendChild(labelEl);
+    tile.addEventListener("click", function () { openModal(null); });
     return tile;
   }
 
   function renderGrid() {
     if (!container) return;
     container.innerHTML = "";
-
     for (var i = 0; i < shortcuts.length; i++) {
       container.appendChild(renderShortcutTile(shortcuts[i]));
     }
-
     if (pluginSettings.showAddButton) {
       container.appendChild(renderAddTile());
     }
@@ -206,14 +195,12 @@
   var currentEditId = null;
 
   function buildModal() {
-    // Overlay
     modalOverlay = document.createElement("div");
     modalOverlay.className = "sc-modal-overlay";
     modalOverlay.addEventListener("click", function (e) {
       if (e.target === modalOverlay) closeModal();
     });
 
-    // Modal box
     modal = document.createElement("div");
     modal.className = "sc-modal";
     modal.setAttribute("role", "dialog");
@@ -225,30 +212,45 @@
       '  <button class="sc-modal-close" type="button" aria-label="Close">&times;</button>',
       '</div>',
       '<form class="sc-modal-form" id="sc-modal-form" autocomplete="off">',
+
+      // URL row with inline favicon preview
       '  <div class="sc-modal-field">',
       '    <label class="sc-modal-label" for="sc-input-url">URL</label>',
       '    <div class="sc-modal-url-row">',
-      '      <input class="sc-modal-input" id="sc-input-url" type="url" placeholder="https://youtube.com" required />',
+      '      <input class="sc-modal-input" id="sc-input-url" type="url" placeholder="https://jellyfin.local:8096" required />',
       '      <div class="sc-modal-url-preview" id="sc-url-preview" style="display:none">',
       '        <img class="sc-modal-favicon" id="sc-modal-favicon" src="" alt="" />',
       '      </div>',
       '    </div>',
       '  </div>',
+
+      // Name
       '  <div class="sc-modal-field">',
       '    <label class="sc-modal-label" for="sc-input-label">',
       '      Name',
-      '      <span class="sc-modal-label-hint" id="sc-label-hint" style="display:none"> — fetching\u2026</span>',
+      '      <span class="sc-modal-label-hint" id="sc-label-hint" style="display:none"> \u2014 fetching\u2026</span>',
       '    </label>',
-      '    <input class="sc-modal-input" id="sc-input-label" type="text" placeholder="YouTube" maxlength="32" required />',
+      '    <input class="sc-modal-input" id="sc-input-label" type="text" placeholder="Jellyfin" maxlength="32" required />',
       '  </div>',
-      '  <div class="sc-modal-field sc-modal-field-color">',
-      '    <label class="sc-modal-label" for="sc-input-color">Color (optional)</label>',
+
+      // Custom icon URL (optional)
+      '  <div class="sc-modal-field">',
+      '    <label class="sc-modal-label" for="sc-input-icon">Custom icon URL <span class="sc-modal-label-opt">(optional)</span></label>',
+      '    <input class="sc-modal-input" id="sc-input-icon" type="url" placeholder="https://example.com/icon.png" />',
+      '    <span class="sc-modal-field-hint">Overrides the auto-detected icon. Leave blank to use the site\'s own icon.</span>',
+      '  </div>',
+
+      // Color
+      '  <div class="sc-modal-field">',
+      '    <label class="sc-modal-label" for="sc-input-color">Background color <span class="sc-modal-label-opt">(optional)</span></label>',
       '    <div class="sc-modal-color-row">',
       '      <input class="sc-modal-color-picker" id="sc-input-color" type="color" value="#4285f4" />',
       '      <input class="sc-modal-input sc-modal-color-text" id="sc-input-color-text" type="text" placeholder="none" maxlength="7" />',
       '      <button class="sc-modal-btn-clear-color" type="button" id="sc-btn-clear-color">Clear</button>',
       '    </div>',
       '  </div>',
+
+      // Actions
       '  <div class="sc-modal-actions">',
       '    <button class="sc-modal-btn sc-modal-btn-delete" type="button" id="sc-btn-delete" style="display:none">Remove</button>',
       '    <div class="sc-modal-actions-right">',
@@ -262,7 +264,6 @@
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
 
-    // Wire up close button
     modal.querySelector(".sc-modal-close").addEventListener("click", closeModal);
     modal.querySelector("#sc-btn-cancel").addEventListener("click", closeModal);
 
@@ -271,25 +272,22 @@
     var colorText   = modal.querySelector("#sc-input-color-text");
     var clearColor  = modal.querySelector("#sc-btn-clear-color");
 
-    colorPicker.addEventListener("input", function () {
-      colorText.value = colorPicker.value;
-    });
+    colorPicker.addEventListener("input", function () { colorText.value = colorPicker.value; });
     colorText.addEventListener("input", function () {
       var v = colorText.value.trim();
-      if (/^#[0-9a-fA-F]{6}$/.test(v)) {
-        colorPicker.value = v;
-      }
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) colorPicker.value = v;
     });
     clearColor.addEventListener("click", function () {
       colorText.value = "";
       colorPicker.value = "#4285f4";
     });
 
-    // Auto-fetch site title + show favicon preview when URL is entered
-    var urlInput    = modal.querySelector("#sc-input-url");
-    var labelInput  = modal.querySelector("#sc-input-label");
-    var labelHint   = modal.querySelector("#sc-label-hint");
-    var urlPreview  = modal.querySelector("#sc-url-preview");
+    // ── Auto-fetch site info on URL entry ────────────────────────────────────
+    var urlInput     = modal.querySelector("#sc-input-url");
+    var labelInput   = modal.querySelector("#sc-input-label");
+    var iconInput    = modal.querySelector("#sc-input-icon");
+    var labelHint    = modal.querySelector("#sc-label-hint");
+    var urlPreview   = modal.querySelector("#sc-url-preview");
     var modalFavicon = modal.querySelector("#sc-modal-favicon");
     var lastFetchedUrl = "";
 
@@ -300,64 +298,66 @@
       try { new URL(v); return v; } catch (_) { return ""; }
     }
 
-    function updateFaviconPreview(url) {
-      if (!url) {
-        urlPreview.style.display = "none";
-        modalFavicon.src = "";
-        return;
-      }
-      try {
-        var hostname = new URL(url).hostname;
-        var faviconSrc = "/api/proxy/image?url=" + encodeURIComponent(
-          "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
-        );
-        modalFavicon.src = faviconSrc;
-        modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
-        modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
-      } catch (_) {
-        urlPreview.style.display = "none";
-      }
+    function showFaviconPreview(src) {
+      if (!src) { urlPreview.style.display = "none"; return; }
+      modalFavicon.src = src;
+      modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
+      modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
     }
 
     function fetchSiteInfo(url) {
       if (!url || url === lastFetchedUrl) return;
       lastFetchedUrl = url;
 
-      // Show favicon immediately from Google S2
-      updateFaviconPreview(url);
+      var userTypedLabel = labelInput.value.trim();
+      var userTypedIcon  = iconInput.value.trim();
 
-      // Only auto-fill name if user hasn't typed one yet
-      if (labelInput.value.trim()) return;
+      // Show a placeholder favicon immediately via Google S2 while we wait
+      if (!userTypedIcon) {
+        try {
+          var hostname = new URL(url).hostname;
+          showFaviconPreview("/api/proxy/image?url=" + encodeURIComponent(
+            "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
+          ));
+        } catch (_) {}
+      }
 
-      labelHint.style.display = "inline";
+      if (!userTypedLabel) labelHint.style.display = "inline";
+
       fetch("/api/plugin/shortcuts/site-info?url=" + encodeURIComponent(url))
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
           labelHint.style.display = "none";
+          // Auto-fill name only if user hasn't typed one
           if (data.title && !labelInput.value.trim()) {
             labelInput.value = data.title.slice(0, 32);
           }
+          // Update favicon preview with the real icon from the page's HTML
+          // (works for self-hosted like Jellyfin, unlike Google S2)
+          if (data.faviconUrl && !iconInput.value.trim()) {
+            showFaviconPreview("/api/proxy/image?url=" + encodeURIComponent(data.faviconUrl));
+            // Store the resolved faviconUrl so the tile can use it
+            modal._pendingFaviconUrl = data.faviconUrl;
+          }
         })
-        .catch(function () {
-          labelHint.style.display = "none";
-        });
+        .catch(function () { labelHint.style.display = "none"; });
     }
 
     urlInput.addEventListener("blur", function () {
       var url = normalizeUrl(urlInput.value);
-      if (url) {
-        // Write normalized value back
-        urlInput.value = url;
-        fetchSiteInfo(url);
-      }
+      if (url) { urlInput.value = url; fetchSiteInfo(url); }
     });
-
-    // Also trigger on paste
     urlInput.addEventListener("paste", function () {
       setTimeout(function () {
         var url = normalizeUrl(urlInput.value);
         if (url) fetchSiteInfo(url);
       }, 0);
+    });
+
+    // When user types a custom icon URL, update the preview
+    iconInput.addEventListener("blur", function () {
+      var v = iconInput.value.trim();
+      if (v) showFaviconPreview(v);
     });
 
     // Delete button
@@ -372,36 +372,36 @@
     // Form submit
     modal.querySelector("#sc-modal-form").addEventListener("submit", function (e) {
       e.preventDefault();
-      var labelVal = modal.querySelector("#sc-input-label").value.trim();
-      var urlVal   = modal.querySelector("#sc-input-url").value.trim();
-      var colorVal = modal.querySelector("#sc-input-color-text").value.trim();
+      var labelVal   = labelInput.value.trim();
+      var urlVal     = normalizeUrl(urlInput.value) || urlInput.value.trim();
+      var iconVal    = iconInput.value.trim() || null;
+      var colorVal   = colorText.value.trim();
+      var colorFinal = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(colorVal) ? colorVal : null;
 
       if (!labelVal || !urlVal) return;
 
-      // Ensure URL has a protocol
-      if (!/^https?:\/\//i.test(urlVal)) {
-        urlVal = "https://" + urlVal;
-      }
-
-      var colorFinal = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(colorVal) ? colorVal : null;
+      // Use the favicon discovered from site-info if no custom icon given
+      var faviconVal = iconVal ? null : (modal._pendingFaviconUrl || null);
 
       if (currentEditId) {
-        // Edit existing
         for (var i = 0; i < shortcuts.length; i++) {
           if (shortcuts[i].id === currentEditId) {
-            shortcuts[i].label = labelVal;
-            shortcuts[i].url   = urlVal;
-            shortcuts[i].color = colorFinal;
+            shortcuts[i].label      = labelVal;
+            shortcuts[i].url        = urlVal;
+            shortcuts[i].iconUrl    = iconVal;
+            shortcuts[i].faviconUrl = iconVal ? null : (faviconVal || shortcuts[i].faviconUrl);
+            shortcuts[i].color      = colorFinal;
             break;
           }
         }
       } else {
-        // Add new
         shortcuts.push({
-          id:    generateId(),
-          label: labelVal,
-          url:   urlVal,
-          color: colorFinal,
+          id:         generateId(),
+          label:      labelVal,
+          url:        urlVal,
+          iconUrl:    iconVal,
+          faviconUrl: faviconVal,
+          color:      colorFinal,
         });
       }
 
@@ -410,7 +410,6 @@
       closeModal();
     });
 
-    // Close on Escape
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && modalOverlay.classList.contains("sc-modal-visible")) {
         closeModal();
@@ -422,59 +421,61 @@
     if (!modal) buildModal();
 
     currentEditId = sc ? sc.id : null;
+    modal._pendingFaviconUrl = null;
 
-    var titleEl    = modal.querySelector("#sc-modal-title");
-    var labelInput = modal.querySelector("#sc-input-label");
-    var urlInput   = modal.querySelector("#sc-input-url");
-    var colorPicker = modal.querySelector("#sc-input-color");
-    var colorText   = modal.querySelector("#sc-input-color-text");
-    var deleteBtn   = modal.querySelector("#sc-btn-delete");
-    var urlPreview  = modal.querySelector("#sc-url-preview");
+    var titleEl      = modal.querySelector("#sc-modal-title");
+    var urlInput     = modal.querySelector("#sc-input-url");
+    var labelInput   = modal.querySelector("#sc-input-label");
+    var iconInput    = modal.querySelector("#sc-input-icon");
+    var colorPicker  = modal.querySelector("#sc-input-color");
+    var colorText    = modal.querySelector("#sc-input-color-text");
+    var deleteBtn    = modal.querySelector("#sc-btn-delete");
+    var urlPreview   = modal.querySelector("#sc-url-preview");
     var modalFavicon = modal.querySelector("#sc-modal-favicon");
-    var labelHint   = modal.querySelector("#sc-label-hint");
+    var labelHint    = modal.querySelector("#sc-label-hint");
+
+    labelHint.style.display = "none";
 
     if (sc) {
-      titleEl.textContent = "Edit Shortcut";
-      labelInput.value = sc.label || "";
-      urlInput.value   = sc.url   || "";
+      titleEl.textContent  = "Edit Shortcut";
+      urlInput.value       = sc.url   || "";
+      labelInput.value     = sc.label || "";
+      iconInput.value      = sc.iconUrl || "";
       var c = sc.color || "";
-      colorText.value  = c;
-      colorPicker.value = /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#4285f4";
+      colorText.value      = c;
+      colorPicker.value    = /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#4285f4";
       deleteBtn.style.display = "inline-flex";
-      // Show favicon for existing shortcut
-      if (sc.url) {
-        try {
-          var hostname = new URL(sc.url).hostname;
-          modalFavicon.src = "/api/proxy/image?url=" + encodeURIComponent(
-            "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
-          );
-          modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
-          modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
-        } catch (_) { urlPreview.style.display = "none"; }
+
+      // Show the stored icon in the preview
+      var previewSrc = sc.iconUrl || (sc.faviconUrl
+        ? "/api/proxy/image?url=" + encodeURIComponent(sc.faviconUrl)
+        : null);
+      if (previewSrc) {
+        modalFavicon.src = previewSrc;
+        modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
+        modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
       } else {
         urlPreview.style.display = "none";
       }
+      modal._pendingFaviconUrl = sc.faviconUrl || null;
     } else {
-      titleEl.textContent = "Add Shortcut";
-      labelInput.value = "";
-      urlInput.value   = "";
-      colorText.value  = "";
-      colorPicker.value = "#4285f4";
+      titleEl.textContent  = "Add Shortcut";
+      urlInput.value       = "";
+      labelInput.value     = "";
+      iconInput.value      = "";
+      colorText.value      = "";
+      colorPicker.value    = "#4285f4";
       deleteBtn.style.display = "none";
       urlPreview.style.display = "none";
-      modalFavicon.src = "";
+      modalFavicon.src     = "";
     }
-
-    labelHint.style.display = "none";
 
     modalOverlay.classList.add("sc-modal-visible");
     setTimeout(function () { urlInput.focus(); }, 50);
   }
 
   function closeModal() {
-    if (modalOverlay) {
-      modalOverlay.classList.remove("sc-modal-visible");
-    }
+    if (modalOverlay) modalOverlay.classList.remove("sc-modal-visible");
     currentEditId = null;
   }
 
@@ -485,12 +486,10 @@
     if (stored) {
       shortcuts = stored.shortcuts;
     } else {
-      // First visit: use server-provided defaults, save them
       shortcuts = defaultShortcutsFromServer || [];
       saveShortcuts(shortcuts);
     }
 
-    // Build the container and insert above the search bar
     var main = document.getElementById("main-home");
     if (!main) return;
 
@@ -498,7 +497,6 @@
     container.className = "sc-grid";
     container.setAttribute("aria-label", "Shortcuts");
 
-    // Insert before .search-container, which is after .logo-container
     var searchContainer = main.querySelector(".search-container");
     if (searchContainer) {
       main.insertBefore(container, searchContainer);
@@ -509,12 +507,12 @@
     renderGrid();
   }
 
-  // Fetch defaults from server, then initialize
-  fetch("/api/plugin/shortcuts/defaults")
-    .then(function (r) { return r.ok ? r.json() : []; })
-    .catch(function () { return []; })
-    .then(function (defaults) {
-      return loadPluginSettings().then(function () { return defaults; });
+  // Load settings first, then defaults, then init — so showAddButton is correct from the start
+  loadPluginSettings()
+    .then(function () {
+      return fetch("/api/plugin/shortcuts/defaults")
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .catch(function () { return []; });
     })
     .then(function (defaults) {
       init(defaults);

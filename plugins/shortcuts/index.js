@@ -90,7 +90,7 @@ export const routes = [
     },
   },
   {
-    // Fetches the <title> of a remote URL so the client can auto-fill the name field.
+    // Fetches the <title> and favicon of a remote URL server-side (bypasses CORS/private networks).
     // ?url=https://example.com
     method: "get",
     path: "/site-info",
@@ -116,6 +116,65 @@ export const routes = [
         });
       }
 
+      const origin = parsedUrl.origin; // e.g. "http://192.168.1.10:8096"
+
+      function decodeEntities(str) {
+        return str
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#039;/g, "'")
+          .replace(/&apos;/g, "'");
+      }
+
+      // Resolve a potentially relative icon href against the page origin
+      function resolveIconUrl(href) {
+        if (!href) return null;
+        href = href.trim();
+        if (/^https?:\/\//i.test(href)) return href;
+        if (href.startsWith("//")) return parsedUrl.protocol + href;
+        if (href.startsWith("/")) return origin + href;
+        return origin + "/" + href;
+      }
+
+      // Extract the best icon from <link> tags in the HTML chunk.
+      // Priority: apple-touch-icon > shortcut icon / icon with largest size > /favicon.ico fallback
+      function extractIconUrl(html) {
+        const linkRe = /<link([^>]+)>/gi;
+        const relRe  = /rel\s*=\s*["']([^"']+)["']/i;
+        const hrefRe = /href\s*=\s*["']([^"']+)["']/i;
+        const sizesRe= /sizes\s*=\s*["']([^"']+)["']/i;
+
+        const candidates = [];
+        let m;
+        while ((m = linkRe.exec(html)) !== null) {
+          const attrs = m[1];
+          const relMatch  = relRe.exec(attrs);
+          const hrefMatch = hrefRe.exec(attrs);
+          if (!relMatch || !hrefMatch) continue;
+          const rel  = relMatch[1].toLowerCase();
+          const href = hrefMatch[1];
+          if (!rel.includes("icon")) continue;
+          const sizesMatch = sizesRe.exec(attrs);
+          const sizes = sizesMatch ? sizesMatch[1] : "";
+          const isApple = rel.includes("apple-touch-icon");
+          // Parse largest dimension from sizes (e.g. "32x32" → 32)
+          const dim = sizes ? Math.max(...sizes.split(/\s+/).map(s => parseInt(s) || 0)) : 0;
+          candidates.push({ href, isApple, dim });
+        }
+
+        if (candidates.length === 0) return null;
+
+        // Sort: apple-touch-icon first, then by size descending
+        candidates.sort((a, b) => {
+          if (a.isApple !== b.isApple) return a.isApple ? -1 : 1;
+          return b.dim - a.dim;
+        });
+
+        return resolveIconUrl(candidates[0].href);
+      }
+
       try {
         const res = await fetch(parsedUrl.href, {
           headers: { "User-Agent": "Mozilla/5.0 (compatible; degoog-shortcuts/1.0)" },
@@ -124,21 +183,20 @@ export const routes = [
         });
 
         if (!res.ok) {
-          return new Response(JSON.stringify({ title: null }), {
+          return new Response(JSON.stringify({ title: null, faviconUrl: null }), {
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        // Read only the first 16 KB — enough to find <title>
+        // Read only the first 16 KB — enough to find <title> and <link> icon tags in <head>
         const reader = res.body.getReader();
         let chunk = "";
-        let done = false;
         let bytesRead = 0;
         const MAX_BYTES = 16384;
 
-        while (!done && bytesRead < MAX_BYTES) {
-          const { value, done: d } = await reader.read();
-          done = d;
+        while (bytesRead < MAX_BYTES) {
+          const { value, done } = await reader.read();
+          if (done) break;
           if (value) {
             chunk += new TextDecoder().decode(value);
             bytesRead += value.byteLength;
@@ -146,25 +204,21 @@ export const routes = [
         }
         reader.cancel().catch(() => {});
 
+        // Extract title
         const titleMatch = chunk.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
-        const rawTitle = titleMatch ? titleMatch[1].trim() : null;
+        const title = titleMatch ? decodeEntities(titleMatch[1].trim()) : null;
 
-        // Decode common HTML entities
-        const title = rawTitle
-          ? rawTitle
-              .replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&quot;/g, '"')
-              .replace(/&#039;/g, "'")
-              .replace(/&apos;/g, "'")
-          : null;
+        // Extract favicon from <link> tags; fall back to /favicon.ico
+        let faviconUrl = extractIconUrl(chunk);
+        if (!faviconUrl) {
+          faviconUrl = origin + "/favicon.ico";
+        }
 
-        return new Response(JSON.stringify({ title }), {
+        return new Response(JSON.stringify({ title, faviconUrl }), {
           headers: { "Content-Type": "application/json" },
         });
       } catch {
-        return new Response(JSON.stringify({ title: null }), {
+        return new Response(JSON.stringify({ title: null, faviconUrl: null }), {
           headers: { "Content-Type": "application/json" },
         });
       }
