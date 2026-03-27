@@ -15,7 +15,7 @@
       "path": "plugins/shortcuts",
       "name": "Shortcuts",
       "description": "Configurable shortcut tiles on the degoog home page. Shortcuts are stored per-browser in localStorage and can be added, edited, or removed directly from the home page.",
-      "version": "1.2.9",
+      "version": "1.3.0",
       "type": "command"
     }
   ],

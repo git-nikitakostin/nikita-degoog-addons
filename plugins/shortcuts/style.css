@@ -301,6 +301,101 @@
   justify-content: center;
   flex-shrink: 0;
   overflow: hidden;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sc-modal-url-preview:hover {
+  border-color: var(--primary, #4285f4);
+  background: var(--bg-hover, #e8eaed);
+}
+
+.sc-modal-url-preview-edit {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: var(--primary, #4285f4);
+  color: #fff;
+  width: 14px;
+  height: 14px;
+  border-top-left-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Icon Picker */
+.sc-icon-picker {
+  margin-top: 8px;
+  background: var(--bg-light, #f8f9fa);
+  border: 1px solid var(--border, #dfe1e5);
+  border-radius: 10px;
+  overflow: hidden;
+  animation: sc-slide-down 0.2s ease-out;
+}
+
+@keyframes sc-slide-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.sc-icon-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light, #ebebeb);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sc-icon-picker-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-secondary);
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.sc-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.sc-picker-item {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border-light, #ebebeb);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.sc-picker-item:hover {
+  border-color: var(--primary, #4285f4);
+  transform: scale(1.05);
+  z-index: 1;
+}
+
+.sc-picker-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .sc-modal-favicon {

@@ -243,9 +243,19 @@
       '    <label class="sc-modal-label" for="sc-input-url">URL</label>',
       '    <div class="sc-modal-url-row">',
       '      <input class="sc-modal-input" id="sc-input-url" type="url" placeholder="https://jellyfin.local:8096" required />',
-      '      <div class="sc-modal-url-preview" id="sc-url-preview" style="display:none">',
+      '      <button class="sc-modal-url-preview" id="sc-url-preview" type="button" title="Change icon" style="display:none">',
       '        <img class="sc-modal-favicon" id="sc-modal-favicon" src="" alt="" />',
+      '        <div class="sc-modal-url-preview-edit">',
+      '          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+      '        </div>',
+      '      </button>',
+      '    </div>',
+      '    <div class="sc-icon-picker" id="sc-icon-picker" style="display:none">',
+      '      <div class="sc-icon-picker-header">',
+      '        <span>Select icon</span>',
+      '        <button class="sc-icon-picker-close" type="button" id="sc-btn-close-picker">&times;</button>',
       '      </div>',
+      '      <div class="sc-icon-picker-grid" id="sc-icon-picker-grid"></div>',
       '    </div>',
       '  </div>',
 
@@ -330,7 +340,11 @@
     var labelHint    = modal.querySelector("#sc-label-hint");
     var urlPreview   = modal.querySelector("#sc-url-preview");
     var modalFavicon = modal.querySelector("#sc-modal-favicon");
+    var picker       = modal.querySelector("#sc-icon-picker");
+    var pickerGrid   = modal.querySelector("#sc-icon-picker-grid");
+    var closePicker  = modal.querySelector("#sc-btn-close-picker");
     var lastFetchedUrl = "";
+    var currentAllIcons = [];
 
     function normalizeUrl(raw) {
       var v = raw.trim();
@@ -345,6 +359,53 @@
       modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
       modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
     }
+
+    function renderIconPicker(icons) {
+      pickerGrid.innerHTML = "";
+      currentAllIcons = icons || [];
+
+      if (currentAllIcons.length <= 1) {
+        picker.style.display = "none";
+        return;
+      }
+
+      currentAllIcons.forEach(function (iconUrl) {
+        var btn = document.createElement("button");
+        btn.className = "sc-picker-item";
+        btn.type = "button";
+        var iconSrc = "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(iconUrl);
+        btn.innerHTML = '<img src="' + iconSrc + '" alt="" />';
+        
+        btn.addEventListener("click", function () {
+          modal._pendingFaviconUrl = iconUrl;
+          showFaviconPreview(iconSrc);
+          picker.style.display = "none";
+        });
+        pickerGrid.appendChild(btn);
+      });
+    }
+
+    urlPreview.addEventListener("click", function () {
+      if (picker.style.display === "none") {
+        if (currentAllIcons.length > 1) {
+          picker.style.display = "block";
+        } else {
+          // If we don't have icons yet, try to fetch them
+          var url = normalizeUrl(urlInput.value);
+          if (url) {
+            fetchSiteInfo(url);
+            // We can't easily wait for the fetch here without making this async,
+            // but the user can click again once it's loaded.
+          }
+        }
+      } else {
+        picker.style.display = "none";
+      }
+    });
+
+    closePicker.addEventListener("click", function () {
+      picker.style.display = "none";
+    });
 
     function fetchSiteInfo(url) {
       if (!url || url === lastFetchedUrl) return;
@@ -373,12 +434,16 @@
             labelInput.value = data.title.slice(0, 32);
           }
 
-          // faviconUrl is the raw verified icon URL (already confirmed fetchable server-side)
+          // faviconUrl is the raw verified icon URL
           if (data.faviconUrl && !iconInput.value.trim()) {
             showFaviconPreview(
               "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(data.faviconUrl)
             );
             modal._pendingFaviconUrl = data.faviconUrl;
+          }
+
+          if (Array.isArray(data.allIcons)) {
+            renderIconPicker(data.allIcons);
           }
         })
         .catch(function () { labelHint.style.display = "none"; });
@@ -478,8 +543,10 @@
     var urlPreview   = modal.querySelector("#sc-url-preview");
     var modalFavicon = modal.querySelector("#sc-modal-favicon");
     var labelHint    = modal.querySelector("#sc-label-hint");
+    var picker       = modal.querySelector("#sc-icon-picker");
 
     labelHint.style.display = "none";
+    picker.style.display = "none";
 
     if (sc) {
       titleEl.textContent  = "Edit Shortcut";

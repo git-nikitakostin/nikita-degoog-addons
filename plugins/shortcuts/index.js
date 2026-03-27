@@ -258,8 +258,9 @@ export const routes = [
 
   {
     // GET /api/plugin/shortcuts/site-info?url=https://...
-    // Returns { title, faviconUrl } where faviconUrl is the best icon URL found,
-    // already verified to be fetchable from this server.
+    // Returns { title, faviconUrl, allIcons[] }
+    //   faviconUrl — best verified icon URL (auto-selected default)
+    //   allIcons   — all verified icon URLs in priority order (for the picker)
     method: "get",
     path: "/site-info",
     handler: async (req) => {
@@ -303,16 +304,23 @@ export const routes = [
       const titleMatch = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
       const title = titleMatch ? decodeEntities(titleMatch[1].trim()) : null;
 
-      // Extract icon candidates from the HTML, then verify each one server-side.
-      // We return the raw URL of the first working icon so the client can request
-      // it through /icon — no double-encoding, no broken proxy chains.
-      const candidates = html ? extractIconCandidates(html, pageUrl.href)
+      const candidates = html
+        ? extractIconCandidates(html, pageUrl.href)
         : [{ url: pageUrl.origin + "/favicon.ico" }];
 
-      const best = await fetchBestIcon(candidates);
-      const faviconUrl = best ? best.url : null;
+      // Verify all candidates in parallel (with a cap), keep the ones that work.
+      const verifyLimit = Math.min(candidates.length, 8);
+      const verified = await Promise.all(
+        candidates.slice(0, verifyLimit).map(async (c) => {
+          const result = await tryFetchIcon(c.url);
+          return result ? c.url : null;
+        })
+      );
+      const allIcons = verified.filter(Boolean);
 
-      return new Response(JSON.stringify({ title, faviconUrl }), {
+      const faviconUrl = allIcons[0] || null;
+
+      return new Response(JSON.stringify({ title, faviconUrl, allIcons }), {
         headers: { "Content-Type": "application/json" },
       });
     },
