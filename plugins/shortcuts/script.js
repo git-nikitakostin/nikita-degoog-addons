@@ -111,6 +111,10 @@
     var iconWrap = document.createElement("div");
     iconWrap.className = "sc-tile-icon";
     if (sc.color) iconWrap.style.background = sc.color;
+    // Per-icon size: stored as integer 20–100 (percent of tile). Default 65.
+    var iconPct = (typeof sc.iconSize === "number" && sc.iconSize >= 20 && sc.iconSize <= 100)
+      ? sc.iconSize : 65;
+    iconWrap.style.setProperty("--sc-icon-size", iconPct + "%");
 
     // Icon image
     var img = document.createElement("img");
@@ -240,6 +244,15 @@
       '    <span class="sc-modal-field-hint">Overrides the auto-detected icon. Leave blank to use the site\'s own icon.</span>',
       '  </div>',
 
+      // Icon size slider
+      '  <div class="sc-modal-field">',
+      '    <label class="sc-modal-label" for="sc-input-size">Icon size</label>',
+      '    <div class="sc-modal-size-row">',
+      '      <input class="sc-modal-size-slider" id="sc-input-size" type="range" min="20" max="100" step="5" value="65" />',
+      '      <span class="sc-modal-size-value" id="sc-size-value">65%</span>',
+      '    </div>',
+      '  </div>',
+
       // Color
       '  <div class="sc-modal-field">',
       '    <label class="sc-modal-label" for="sc-input-color">Background color <span class="sc-modal-label-opt">(optional)</span></label>',
@@ -280,6 +293,13 @@
     clearColor.addEventListener("click", function () {
       colorText.value = "";
       colorPicker.value = "#4285f4";
+    });
+
+    // Icon size slider
+    var sizeSlider = modal.querySelector("#sc-input-size");
+    var sizeValue  = modal.querySelector("#sc-size-value");
+    sizeSlider.addEventListener("input", function () {
+      sizeValue.textContent = sizeSlider.value + "%";
     });
 
     // ── Auto-fetch site info on URL entry ────────────────────────────────────
@@ -375,6 +395,7 @@
       var labelVal   = labelInput.value.trim();
       var urlVal     = normalizeUrl(urlInput.value) || urlInput.value.trim();
       var iconVal    = iconInput.value.trim() || null;
+      var iconSzVal  = parseInt(sizeSlider.value, 10) || 65;
       var colorVal   = colorText.value.trim();
       var colorFinal = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(colorVal) ? colorVal : null;
 
@@ -390,6 +411,7 @@
             shortcuts[i].url        = urlVal;
             shortcuts[i].iconUrl    = iconVal;
             shortcuts[i].faviconUrl = iconVal ? null : (faviconVal || shortcuts[i].faviconUrl);
+            shortcuts[i].iconSize   = iconSzVal;
             shortcuts[i].color      = colorFinal;
             break;
           }
@@ -401,6 +423,7 @@
           url:        urlVal,
           iconUrl:    iconVal,
           faviconUrl: faviconVal,
+          iconSize:   iconSzVal,
           color:      colorFinal,
         });
       }
@@ -427,6 +450,8 @@
     var urlInput     = modal.querySelector("#sc-input-url");
     var labelInput   = modal.querySelector("#sc-input-label");
     var iconInput    = modal.querySelector("#sc-input-icon");
+    var sizeSlider   = modal.querySelector("#sc-input-size");
+    var sizeValue    = modal.querySelector("#sc-size-value");
     var colorPicker  = modal.querySelector("#sc-input-color");
     var colorText    = modal.querySelector("#sc-input-color-text");
     var deleteBtn    = modal.querySelector("#sc-btn-delete");
@@ -441,6 +466,9 @@
       urlInput.value       = sc.url   || "";
       labelInput.value     = sc.label || "";
       iconInput.value      = sc.iconUrl || "";
+      var sz = (typeof sc.iconSize === "number" && sc.iconSize >= 20 && sc.iconSize <= 100) ? sc.iconSize : 65;
+      sizeSlider.value     = sz;
+      sizeValue.textContent = sz + "%";
       var c = sc.color || "";
       colorText.value      = c;
       colorPicker.value    = /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#4285f4";
@@ -463,6 +491,8 @@
       urlInput.value       = "";
       labelInput.value     = "";
       iconInput.value      = "";
+      sizeSlider.value     = 65;
+      sizeValue.textContent = "65%";
       colorText.value      = "";
       colorPicker.value    = "#4285f4";
       deleteBtn.style.display = "none";

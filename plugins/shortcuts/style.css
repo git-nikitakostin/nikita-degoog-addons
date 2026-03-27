@@ -65,10 +65,11 @@
 }
 
 .sc-tile-favicon {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;          /* fill the whole square so rectangular icons look right */
+  width: var(--sc-icon-size, 65%);
+  height: var(--sc-icon-size, 65%);
+  object-fit: contain;
   display: block;
+  flex-shrink: 0;
 }
 
 .sc-tile-initials {
@@ -253,6 +254,28 @@
   color: var(--text-secondary);
   opacity: 0.8;
   line-height: 1.4;
+}
+
+/* Icon size slider row */
+.sc-modal-size-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sc-modal-size-slider {
+  flex: 1;
+  accent-color: var(--primary, #4285f4);
+  cursor: pointer;
+  height: 4px;
+}
+
+.sc-modal-size-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* URL row with inline favicon preview */
