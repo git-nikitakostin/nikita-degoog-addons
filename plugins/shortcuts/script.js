@@ -48,20 +48,29 @@
     return Math.random().toString(36).slice(2, 10);
   }
 
-  // Returns the URL to use for showing the icon of a shortcut.
-  // Priority: custom icon > stored faviconUrl from site-info > Google S2 fallback
+  // Returns the src URL used to display the shortcut icon in a tile.
+  // All requests go through /api/plugin/shortcuts/icon which runs server-side,
+  // so it can reach private-network hosts and has permissive content-type handling.
+  //
+  // Priority:
+  //   1. sc.iconUrl  — user-supplied custom icon URL
+  //   2. sc.iconSrc  — pre-built /icon?url=...&candidates=... from site-info (best)
+  //   3. sc.faviconUrl — raw primary icon URL discovered from site-info
+  //   4. /favicon.ico on the site origin (last resort)
   function getIconSrc(sc) {
-    if (sc.iconUrl && sc.iconUrl.trim()) return sc.iconUrl.trim();
-    if (sc.faviconUrl && sc.faviconUrl.trim()) {
-      // Proxy through degoog to handle private-network URLs
-      return "/api/proxy/image?url=" + encodeURIComponent(sc.faviconUrl.trim());
+    if (sc.iconUrl && sc.iconUrl.trim()) {
+      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(sc.iconUrl.trim());
     }
-    // Google S2 last-resort (only works for public sites)
+    if (sc.iconSrc && sc.iconSrc.trim()) {
+      // Already a fully-formed /icon?... request, use as-is
+      return sc.iconSrc.trim();
+    }
+    if (sc.faviconUrl && sc.faviconUrl.trim()) {
+      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(sc.faviconUrl.trim());
+    }
     try {
-      var hostname = new URL(sc.url).hostname;
-      return "/api/proxy/image?url=" + encodeURIComponent(
-        "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
-      );
+      var origin = new URL(sc.url).origin;
+      return "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(origin + "/favicon.ico");
     } catch (_) { return ""; }
   }
 
@@ -332,13 +341,13 @@
       var userTypedLabel = labelInput.value.trim();
       var userTypedIcon  = iconInput.value.trim();
 
-      // Show a placeholder favicon immediately via Google S2 while we wait
+      // Show a placeholder via our own /icon route immediately while we wait
       if (!userTypedIcon) {
         try {
-          var hostname = new URL(url).hostname;
-          showFaviconPreview("/api/proxy/image?url=" + encodeURIComponent(
-            "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
-          ));
+          var origin = new URL(url).origin;
+          showFaviconPreview(
+            "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(origin + "/favicon.ico")
+          );
         } catch (_) {}
       }
 
@@ -348,16 +357,27 @@
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
           labelHint.style.display = "none";
+
           // Auto-fill name only if user hasn't typed one
           if (data.title && !labelInput.value.trim()) {
             labelInput.value = data.title.slice(0, 32);
           }
-          // Update favicon preview with the real icon from the page's HTML
-          // (works for self-hosted like Jellyfin, unlike Google S2)
-          if (data.faviconUrl && !iconInput.value.trim()) {
-            showFaviconPreview("/api/proxy/image?url=" + encodeURIComponent(data.faviconUrl));
-            // Store the resolved faviconUrl so the tile can use it
-            modal._pendingFaviconUrl = data.faviconUrl;
+
+          // iconCandidates is an ordered list of URLs to try, best first.
+          // Build a single /icon?url=<primary>&candidates=<rest> request so
+          // the server tries them in order and returns the first that works.
+          var candidates = Array.isArray(data.iconCandidates) ? data.iconCandidates : [];
+          if (candidates.length > 0 && !iconInput.value.trim()) {
+            var primary = candidates[0];
+            var rest    = candidates.slice(1);
+            var iconSrc = "/api/plugin/shortcuts/icon?url=" + encodeURIComponent(primary);
+            if (rest.length > 0) {
+              iconSrc += "&candidates=" + encodeURIComponent(rest.join(","));
+            }
+            showFaviconPreview(iconSrc);
+            // Store the best candidate URL so it can be saved on the shortcut
+            modal._pendingFaviconUrl = primary;
+            modal._pendingIconSrc    = iconSrc;
           }
         })
         .catch(function () { labelHint.style.display = "none"; });
@@ -401,8 +421,10 @@
 
       if (!labelVal || !urlVal) return;
 
-      // Use the favicon discovered from site-info if no custom icon given
+      // faviconUrl = the raw icon URL (primary candidate from site-info).
+      // iconSrc    = the /icon?url=...&candidates=... string used by getIconSrc().
       var faviconVal = iconVal ? null : (modal._pendingFaviconUrl || null);
+      var iconSrcVal = iconVal ? null : (modal._pendingIconSrc    || null);
 
       if (currentEditId) {
         for (var i = 0; i < shortcuts.length; i++) {
@@ -411,6 +433,7 @@
             shortcuts[i].url        = urlVal;
             shortcuts[i].iconUrl    = iconVal;
             shortcuts[i].faviconUrl = iconVal ? null : (faviconVal || shortcuts[i].faviconUrl);
+            shortcuts[i].iconSrc    = iconVal ? null : (iconSrcVal || shortcuts[i].iconSrc);
             shortcuts[i].iconSize   = iconSzVal;
             shortcuts[i].color      = colorFinal;
             break;
@@ -423,6 +446,7 @@
           url:        urlVal,
           iconUrl:    iconVal,
           faviconUrl: faviconVal,
+          iconSrc:    iconSrcVal,
           iconSize:   iconSzVal,
           color:      colorFinal,
         });
@@ -445,6 +469,7 @@
 
     currentEditId = sc ? sc.id : null;
     modal._pendingFaviconUrl = null;
+    modal._pendingIconSrc    = null;
 
     var titleEl      = modal.querySelector("#sc-modal-title");
     var urlInput     = modal.querySelector("#sc-input-url");
@@ -474,10 +499,8 @@
       colorPicker.value    = /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#4285f4";
       deleteBtn.style.display = "inline-flex";
 
-      // Show the stored icon in the preview
-      var previewSrc = sc.iconUrl || (sc.faviconUrl
-        ? "/api/proxy/image?url=" + encodeURIComponent(sc.faviconUrl)
-        : null);
+      // Show the stored icon in the preview using the same logic as the tile
+      var previewSrc = getIconSrc(sc);
       if (previewSrc) {
         modalFavicon.src = previewSrc;
         modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
@@ -486,6 +509,7 @@
         urlPreview.style.display = "none";
       }
       modal._pendingFaviconUrl = sc.faviconUrl || null;
+      modal._pendingIconSrc    = sc.iconSrc    || null;
     } else {
       titleEl.textContent  = "Add Shortcut";
       urlInput.value       = "";
