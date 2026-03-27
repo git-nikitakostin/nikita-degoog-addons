@@ -54,14 +54,19 @@ function resolveUrl(href, pageUrl) {
   try { return new URL(href, pageUrl).href; } catch { return null; }
 }
 
-// Extract icon candidates from HTML <link> tags, ordered best-first.
+// Extract icon candidates from HTML <link> tags, ordered to match what the
+// browser actually shows in the tab — same priority the browser uses:
+//   1. rel="icon" SVG  (scalable, always sharp)
+//   2. rel="icon" PNG/ICO, largest declared size first
+//   3. rel="shortcut icon"
+//   4. /favicon.ico  (universal fallback)
+//   5. rel="apple-touch-icon"  (home-screen icon, last resort)
 function extractIconCandidates(html, pageUrl) {
-  // Match all <link ...> or <link ... />
   const linkRe  = /<link([^>]+?)(?:\/>|>)/gi;
-  // Allow quoted or unquoted attribute values
   const relRe   = /\brel\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
   const hrefRe  = /\bhref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
   const sizesRe = /\bsizes\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
+  const typeRe  = /\btype\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>\/]+))/i;
 
   const candidates = [];
   let m;
@@ -76,31 +81,49 @@ function extractIconCandidates(html, pageUrl) {
     if (!href || !rel.includes("icon")) continue;
 
     const sizesMatch = sizesRe.exec(attrs);
+    const typeMatch  = typeRe.exec(attrs);
     const sizes = sizesMatch ? (sizesMatch[1] || sizesMatch[2] || sizesMatch[3] || "") : "";
-    const isApple = rel.includes("apple-touch-icon");
+    const type  = (typeMatch  ? (typeMatch[1]  || typeMatch[2]  || typeMatch[3]  || "") : "").toLowerCase().trim();
+
+    const isApple     = rel.includes("apple-touch-icon");
+    const isShortcut  = rel.includes("shortcut");
+    const isSvg       = type === "image/svg+xml" || href.toLowerCase().split("?")[0].endsWith(".svg");
+
+    // Parse the largest pixel dimension from sizes (e.g. "32x32 64x64" → 64)
     const dim = sizes
       ? Math.max(0, ...sizes.trim().split(/\s+/).map(s => parseInt(s) || 0))
       : 0;
 
     const resolved = resolveUrl(href, pageUrl);
-    if (resolved) candidates.push({ url: resolved, isApple, dim });
+    if (resolved) candidates.push({ url: resolved, isApple, isShortcut, isSvg, dim });
   }
 
-  // Sort: apple-touch-icon first, then largest declared size
+  // Sort to match browser tab icon selection priority:
+  //   SVG icons first (scalable) > regular icons by size desc > shortcut icon > apple-touch-icon
   candidates.sort((a, b) => {
-    if (a.isApple !== b.isApple) return a.isApple ? -1 : 1;
+    // SVG always wins
+    if (a.isSvg !== b.isSvg) return a.isSvg ? -1 : 1;
+    // apple-touch-icon goes last
+    if (a.isApple !== b.isApple) return a.isApple ? 1 : -1;
+    // shortcut icon goes before apple but after regular
+    if (a.isShortcut !== b.isShortcut) return a.isShortcut ? 1 : -1;
+    // Among same type, prefer larger declared size
     return b.dim - a.dim;
   });
 
-  // Always include /favicon.ico as last resort
+  // /favicon.ico goes after declared icons, before apple-touch-icon
   try {
     const faviconIco = new URL(pageUrl).origin + "/favicon.ico";
     if (!candidates.some(c => c.url === faviconIco)) {
-      candidates.push({ url: faviconIco, isApple: false, dim: 0 });
+      // Insert before the first apple-touch-icon entry (or at end if none)
+      const appleIdx = candidates.findIndex(c => c.isApple);
+      const entry = { url: faviconIco, isApple: false, isShortcut: false, isSvg: false, dim: 0 };
+      if (appleIdx === -1) candidates.push(entry);
+      else candidates.splice(appleIdx, 0, entry);
     }
   } catch {}
 
-  // Deduplicate
+  // Deduplicate by URL
   const seen = new Set();
   return candidates.filter(c => {
     if (seen.has(c.url)) return false;
