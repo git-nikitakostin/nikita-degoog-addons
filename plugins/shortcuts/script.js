@@ -226,18 +226,26 @@
       '</div>',
       '<form class="sc-modal-form" id="sc-modal-form" autocomplete="off">',
       '  <div class="sc-modal-field">',
-      '    <label class="sc-modal-label" for="sc-input-label">Name</label>',
-      '    <input class="sc-modal-input" id="sc-input-label" type="text" placeholder="YouTube" maxlength="32" required />',
+      '    <label class="sc-modal-label" for="sc-input-url">URL</label>',
+      '    <div class="sc-modal-url-row">',
+      '      <input class="sc-modal-input" id="sc-input-url" type="url" placeholder="https://youtube.com" required />',
+      '      <div class="sc-modal-url-preview" id="sc-url-preview" style="display:none">',
+      '        <img class="sc-modal-favicon" id="sc-modal-favicon" src="" alt="" />',
+      '      </div>',
+      '    </div>',
       '  </div>',
       '  <div class="sc-modal-field">',
-      '    <label class="sc-modal-label" for="sc-input-url">URL</label>',
-      '    <input class="sc-modal-input" id="sc-input-url" type="url" placeholder="https://youtube.com" required />',
+      '    <label class="sc-modal-label" for="sc-input-label">',
+      '      Name',
+      '      <span class="sc-modal-label-hint" id="sc-label-hint" style="display:none"> — fetching\u2026</span>',
+      '    </label>',
+      '    <input class="sc-modal-input" id="sc-input-label" type="text" placeholder="YouTube" maxlength="32" required />',
       '  </div>',
       '  <div class="sc-modal-field sc-modal-field-color">',
       '    <label class="sc-modal-label" for="sc-input-color">Color (optional)</label>',
       '    <div class="sc-modal-color-row">',
       '      <input class="sc-modal-color-picker" id="sc-input-color" type="color" value="#4285f4" />',
-      '      <input class="sc-modal-input sc-modal-color-text" id="sc-input-color-text" type="text" placeholder="#4285f4" maxlength="7" />',
+      '      <input class="sc-modal-input sc-modal-color-text" id="sc-input-color-text" type="text" placeholder="none" maxlength="7" />',
       '      <button class="sc-modal-btn-clear-color" type="button" id="sc-btn-clear-color">Clear</button>',
       '    </div>',
       '  </div>',
@@ -275,6 +283,81 @@
     clearColor.addEventListener("click", function () {
       colorText.value = "";
       colorPicker.value = "#4285f4";
+    });
+
+    // Auto-fetch site title + show favicon preview when URL is entered
+    var urlInput    = modal.querySelector("#sc-input-url");
+    var labelInput  = modal.querySelector("#sc-input-label");
+    var labelHint   = modal.querySelector("#sc-label-hint");
+    var urlPreview  = modal.querySelector("#sc-url-preview");
+    var modalFavicon = modal.querySelector("#sc-modal-favicon");
+    var lastFetchedUrl = "";
+
+    function normalizeUrl(raw) {
+      var v = raw.trim();
+      if (!v) return "";
+      if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+      try { new URL(v); return v; } catch (_) { return ""; }
+    }
+
+    function updateFaviconPreview(url) {
+      if (!url) {
+        urlPreview.style.display = "none";
+        modalFavicon.src = "";
+        return;
+      }
+      try {
+        var hostname = new URL(url).hostname;
+        var faviconSrc = "/api/proxy/image?url=" + encodeURIComponent(
+          "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
+        );
+        modalFavicon.src = faviconSrc;
+        modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
+        modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
+      } catch (_) {
+        urlPreview.style.display = "none";
+      }
+    }
+
+    function fetchSiteInfo(url) {
+      if (!url || url === lastFetchedUrl) return;
+      lastFetchedUrl = url;
+
+      // Show favicon immediately from Google S2
+      updateFaviconPreview(url);
+
+      // Only auto-fill name if user hasn't typed one yet
+      if (labelInput.value.trim()) return;
+
+      labelHint.style.display = "inline";
+      fetch("/api/plugin/shortcuts/site-info?url=" + encodeURIComponent(url))
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (data) {
+          labelHint.style.display = "none";
+          if (data.title && !labelInput.value.trim()) {
+            labelInput.value = data.title.slice(0, 32);
+          }
+        })
+        .catch(function () {
+          labelHint.style.display = "none";
+        });
+    }
+
+    urlInput.addEventListener("blur", function () {
+      var url = normalizeUrl(urlInput.value);
+      if (url) {
+        // Write normalized value back
+        urlInput.value = url;
+        fetchSiteInfo(url);
+      }
+    });
+
+    // Also trigger on paste
+    urlInput.addEventListener("paste", function () {
+      setTimeout(function () {
+        var url = normalizeUrl(urlInput.value);
+        if (url) fetchSiteInfo(url);
+      }, 0);
     });
 
     // Delete button
@@ -340,12 +423,15 @@
 
     currentEditId = sc ? sc.id : null;
 
-    var titleEl   = modal.querySelector("#sc-modal-title");
+    var titleEl    = modal.querySelector("#sc-modal-title");
     var labelInput = modal.querySelector("#sc-input-label");
     var urlInput   = modal.querySelector("#sc-input-url");
     var colorPicker = modal.querySelector("#sc-input-color");
     var colorText   = modal.querySelector("#sc-input-color-text");
     var deleteBtn   = modal.querySelector("#sc-btn-delete");
+    var urlPreview  = modal.querySelector("#sc-url-preview");
+    var modalFavicon = modal.querySelector("#sc-modal-favicon");
+    var labelHint   = modal.querySelector("#sc-label-hint");
 
     if (sc) {
       titleEl.textContent = "Edit Shortcut";
@@ -355,6 +441,19 @@
       colorText.value  = c;
       colorPicker.value = /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#4285f4";
       deleteBtn.style.display = "inline-flex";
+      // Show favicon for existing shortcut
+      if (sc.url) {
+        try {
+          var hostname = new URL(sc.url).hostname;
+          modalFavicon.src = "/api/proxy/image?url=" + encodeURIComponent(
+            "https://www.google.com/s2/favicons?domain=" + hostname + "&sz=64"
+          );
+          modalFavicon.onerror = function () { urlPreview.style.display = "none"; };
+          modalFavicon.onload  = function () { urlPreview.style.display = "flex"; };
+        } catch (_) { urlPreview.style.display = "none"; }
+      } else {
+        urlPreview.style.display = "none";
+      }
     } else {
       titleEl.textContent = "Add Shortcut";
       labelInput.value = "";
@@ -362,10 +461,14 @@
       colorText.value  = "";
       colorPicker.value = "#4285f4";
       deleteBtn.style.display = "none";
+      urlPreview.style.display = "none";
+      modalFavicon.src = "";
     }
 
+    labelHint.style.display = "none";
+
     modalOverlay.classList.add("sc-modal-visible");
-    setTimeout(function () { labelInput.focus(); }, 50);
+    setTimeout(function () { urlInput.focus(); }, 50);
   }
 
   function closeModal() {

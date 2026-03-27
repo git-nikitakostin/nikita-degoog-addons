@@ -228,6 +228,45 @@
   gap: 5px;
 }
 
+/* URL row with inline favicon preview */
+.sc-modal-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sc-modal-url-row .sc-modal-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.sc-modal-url-preview {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bg-light, #f8f9fa);
+  border: 1px solid var(--border, #dfe1e5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sc-modal-favicon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+/* Hint text next to label */
+.sc-modal-label-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 .sc-modal-label {
   font-size: 13px;
   font-weight: 500;

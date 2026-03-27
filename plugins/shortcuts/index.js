@@ -6,17 +6,8 @@
  * a browser has no locally stored shortcuts yet.
  */
 
-const DEFAULT_SHORTCUTS = [
-  { id: "yt",  label: "YouTube",  url: "https://youtube.com",  color: "#ff0000" },
-  { id: "gh",  label: "GitHub",   url: "https://github.com",   color: "#333333" },
-  { id: "rd",  label: "Reddit",   url: "https://reddit.com",   color: "#ff4500" },
-  { id: "tw",  label: "Twitter",  url: "https://x.com",        color: "#1da1f2" },
-  { id: "wp",  label: "Wikipedia",url: "https://wikipedia.org",color: "#636466" },
-  { id: "gm",  label: "Gmail",    url: "https://gmail.com",    color: "#ea4335" },
-];
-
 /** Current defaults from settings (may be overridden by configure()) */
-let defaultShortcuts = DEFAULT_SHORTCUTS.slice();
+let defaultShortcuts = [];
 
 /** Parse the urllist setting into shortcut objects */
 function parseShortcutList(rawList) {
@@ -75,7 +66,7 @@ export default {
 
   configure(settings) {
     const parsed = parseShortcutList(settings.defaultShortcuts);
-    defaultShortcuts = parsed || DEFAULT_SHORTCUTS.slice();
+    defaultShortcuts = parsed || [];
   },
 
   async execute() {
@@ -87,7 +78,6 @@ export default {
 };
 
 // ─── Plugin Routes ────────────────────────────────────────────────────────────
-// These routes let the client-side script fetch the server-configured defaults.
 
 export const routes = [
   {
@@ -97,6 +87,87 @@ export const routes = [
       return new Response(JSON.stringify(defaultShortcuts), {
         headers: { "Content-Type": "application/json" },
       });
+    },
+  },
+  {
+    // Fetches the <title> of a remote URL so the client can auto-fill the name field.
+    // ?url=https://example.com
+    method: "get",
+    path: "/site-info",
+    handler: async (req) => {
+      const reqUrl = new URL(req.url);
+      const target = reqUrl.searchParams.get("url");
+
+      if (!target) {
+        return new Response(JSON.stringify({ error: "Missing url param" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(target);
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error("Bad protocol");
+      } catch {
+        return new Response(JSON.stringify({ error: "Invalid URL" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      try {
+        const res = await fetch(parsedUrl.href, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; degoog-shortcuts/1.0)" },
+          signal: AbortSignal.timeout(6000),
+          redirect: "follow",
+        });
+
+        if (!res.ok) {
+          return new Response(JSON.stringify({ title: null }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        // Read only the first 16 KB — enough to find <title>
+        const reader = res.body.getReader();
+        let chunk = "";
+        let done = false;
+        let bytesRead = 0;
+        const MAX_BYTES = 16384;
+
+        while (!done && bytesRead < MAX_BYTES) {
+          const { value, done: d } = await reader.read();
+          done = d;
+          if (value) {
+            chunk += new TextDecoder().decode(value);
+            bytesRead += value.byteLength;
+          }
+        }
+        reader.cancel().catch(() => {});
+
+        const titleMatch = chunk.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
+        const rawTitle = titleMatch ? titleMatch[1].trim() : null;
+
+        // Decode common HTML entities
+        const title = rawTitle
+          ? rawTitle
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&#039;/g, "'")
+              .replace(/&apos;/g, "'")
+          : null;
+
+        return new Response(JSON.stringify({ title }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch {
+        return new Response(JSON.stringify({ title: null }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
     },
   },
 ];
